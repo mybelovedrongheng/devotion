@@ -2016,14 +2016,14 @@ body {
         <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="sendImageFile(this)">
         <input type="file" id="videoInput" accept="video/*" style="display:none" onchange="sendVideoFile(this)">
         <!-- Emoji 输入面板（仅表情包，不含 Emoji 字符） -->
-        <div id="emojiInputPanel" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--glass-bg);backdrop-filter:blur(16px);border-top:0.5px solid var(--border);z-index:20;flex-direction:column;max-height:220px;">
+        <div id="emojiInputPanel" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--glass-bg);backdrop-filter:blur(16px);border-top:0.5px solid var(--border);z-index:20;flex-direction:column;max-height:60vh;min-height:200px;">
           <div style="display:flex;border-bottom:0.5px solid var(--border);padding:0 10px;flex-shrink:0;align-items:center;">
             <div id="eiTabSticker" style="padding:7px 12px;font-size:11px;color:var(--primary-deep);cursor:pointer;font-weight:500;position:relative;">表情包
               <span style="position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--primary-gradient);border-radius:2px 2px 0 0;"></span>
             </div>
             <button onclick="document.getElementById('emojiInputPanel').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--text-hint);cursor:pointer;padding:0 8px;font-size:14px;">✕</button>
           </div>
-          <div id="eiContent" style="overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px;"></div>
+          <div id="eiContent" style="overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px;-webkit-overflow-scrolling:touch;"></div>
         </div>
         <!-- 词卡选择面板 -->
         <div id="cardInputPanel" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--glass-bg);backdrop-filter:blur(16px);border-top:0.5px solid var(--border);z-index:20;flex-direction:column;max-height:220px;">
@@ -2138,16 +2138,30 @@ body {
           </div>
           <div style="padding:0 6px 4px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <div>
-              <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">最快（秒）</div>
-              <input type="number" id="fastestReplyInput" min="1" max="30" value="3"
-                oninput="updateReplySpeed('fastest',this.value)"
-                class="modal-input" style="margin-bottom:0;text-align:center;padding:6px;font-size:13px;">
+              <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">最快</div>
+              <div style="display:flex;gap:4px;align-items:center;">
+                <input type="number" id="fastestReplyInput" min="1" max="9999" value="3"
+                  oninput="updateReplySpeed('fastest',this.value)"
+                  class="modal-input" style="margin-bottom:0;text-align:center;padding:6px;font-size:13px;flex:1;min-width:0;">
+                <select id="fastestReplyUnit" onchange="updateReplySpeedUnit('fastest',this.value)"
+                  style="border:1.5px solid var(--border);border-radius:8px;padding:5px 4px;font-size:12px;background:var(--bg-input,var(--bg-main));color:var(--text-main);cursor:pointer;flex-shrink:0;">
+                  <option value="sec">秒</option>
+                  <option value="min">分钟</option>
+                </select>
+              </div>
             </div>
             <div>
-              <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">最慢（分钟）</div>
-              <input type="number" id="slowestReplyInput" min="1" max="60" value="1"
-                oninput="updateReplySpeed('slowest',this.value)"
-                class="modal-input" style="margin-bottom:0;text-align:center;padding:6px;font-size:13px;">
+              <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">最慢</div>
+              <div style="display:flex;gap:4px;align-items:center;">
+                <input type="number" id="slowestReplyInput" min="1" max="9999" value="1"
+                  oninput="updateReplySpeed('slowest',this.value)"
+                  class="modal-input" style="margin-bottom:0;text-align:center;padding:6px;font-size:13px;flex:1;min-width:0;">
+                <select id="slowestReplyUnit" onchange="updateReplySpeedUnit('slowest',this.value)"
+                  style="border:1.5px solid var(--border);border-radius:8px;padding:5px 4px;font-size:12px;background:var(--bg-input,var(--bg-main));color:var(--text-main);cursor:pointer;flex-shrink:0;">
+                  <option value="sec">秒</option>
+                  <option value="min">分钟</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -2682,6 +2696,7 @@ body {
         <div class="panel-tabs" style="padding:0 12px;flex-shrink:0;" id="emojiViewTabs">
           <div class="panel-tab active" onclick="switchEmojiTab('my',this)">我的表情包</div>
           <div class="panel-tab" onclick="switchEmojiTab('his',this)">对方表情包</div>
+          <div class="panel-tab" onclick="switchEmojiTab('emojilib',this)">Emoji 库</div>
         </div>
         <!-- 我的表情包 -->
         <div id="emojiTabMy" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -2705,8 +2720,16 @@ body {
           </div>
           <div id="hisEmojiGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;overflow-y:auto;flex:1;"></div>
         </div>
-        <!-- Emoji 字符库（仅角色使用，不显示给用户） -->
-        <div id="emojiTabLib" style="display:none;"></div>
+        <!-- Emoji 字符库（角色绘画时随机插入） -->
+        <div id="emojiTabLib" style="display:none;flex-direction:column;overflow:hidden;flex:1;">
+          <div style="padding:10px 14px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:12px;color:var(--text-sub);">角色绘画时随机插入的 Emoji（点击删除）</span>
+            <button class="btn primary" style="margin-left:auto;padding:5px 12px;font-size:11px;" onclick="openModal('addEmojiLib')">
+              <i class="fa-solid fa-plus"></i> 添加
+            </button>
+          </div>
+          <div id="emojiLibGrid" style="display:flex;flex-wrap:wrap;gap:8px;padding:14px;overflow-y:auto;flex:1;align-content:flex-start;"></div>
+        </div>
       </div>
     </div>
 
@@ -3070,10 +3093,7 @@ body {
     <div class="modal-body">
       <textarea class="modal-input" rows="4" placeholder="每行一条，支持批量添加" id="newCardText" style="resize:vertical;"></textarea>
       <select class="modal-input" id="newCardGroup">
-        <option value="日常">日常</option>
-        <option value="撒娇">撒娇</option>
-        <option value="关心">关心</option>
-        <option value="睡前">睡前</option>
+        <!-- 由 populateAddCardGroupSelect() 动态填充 -->
       </select>
     </div>
     <div class="modal-footer">
@@ -3242,6 +3262,21 @@ body {
     </div>
   </div>
 
+  <!-- Emoji 库添加 -->
+  <div class="modal-box" id="modal-addEmojiLib" style="display:none;">
+    <div class="modal-header">
+      <span class="modal-title">添加 Emoji 到角色库</span>
+      <button class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <textarea class="modal-input" rows="3" placeholder="输入 Emoji，直接粘贴，每个单独或连续输入均可" id="newEmojiLibText" style="resize:vertical;font-size:20px;line-height:2;"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn cancel" onclick="closeModal()">取消</button>
+      <button class="btn primary" onclick="addEmojiLibItems()">添加</button>
+    </div>
+  </div>
+
   <!-- 状态文案添加 -->
   <div class="modal-box" id="modal-addStatus" style="display:none;">
     <div class="modal-header">
@@ -3361,6 +3396,7 @@ const DEFAULT_DATA = {
   settings: {
     chatBg: '', listBg: '',
     fastestReply: 3,
+    fastestReplyData: { value: 3, unit: 'sec' },
     slowestReply: { value: 1, unit: 'min' },
     readNotReply: false,
     readReceipt: true,
@@ -3455,8 +3491,14 @@ async function loadDataAsync() {
       _idbReady = true;
       return;
     }
-    appData = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+    // ★ 竞态修复：IDB 异步读取期间，用户可能已对 appData 做了修改（如添加状态字/拍一拍）
+    // 将 IDB 完整数据（含图片）作为基础，再把内存里的当前 appData 覆盖上去，
+    // 保留用户在 IDB 加载完成前做的所有改动
+    const idbBase = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+    appData = deepMerge(idbBase, appData);
     _idbReady = true; // IDB 完整数据已加载，后续 saveData 可安全写入
+    // 立即把合并后的完整数据写回 IDB，确保图片等大数据也得到保留
+    _idbSet(DATA_KEY, appData).catch(e => console.warn('[MultiChat] IDB resync error:', e));
     // 同步主题和当前聊天
     setTheme(appData.settings.theme || 'pink', false);
     currentChatId = appData.settings.currentChatId || appData.chats[0]?.id || 1;
@@ -3696,6 +3738,11 @@ function switchView(name, navEl) {
   // 切换到词卡视图时，重新渲染
   if (name === 'cards') {
     renderCards();
+  }
+
+  // 切换到状态库视图时，重新渲染
+  if (name === 'statusLib') {
+    renderStatusList();
   }
 }
 
@@ -4083,11 +4130,14 @@ function triggerAutoReply(chat, triggeredMsgId) {
   }
 
   // ── 计算延迟 (ms)
-  const fastest   = (settings.fastestReply || 3) * 1000;
+  const fastData = settings.fastestReplyData;
+  const fastestMs = fastData
+    ? (fastData.unit === 'min' ? fastData.value * 60 * 1000 : fastData.value * 1000)
+    : (settings.fastestReply || 3) * 1000;
   const slowestMs = settings.slowestReply.unit === 'min'
     ? settings.slowestReply.value * 60 * 1000
     : settings.slowestReply.value * 1000;
-  const delay = fastest + Math.random() * Math.max(0, slowestMs - fastest);
+  const delay = fastestMs + Math.random() * Math.max(0, slowestMs - fastestMs);
 
   // ── 已读标记：仅写内存，不提前 render（避免已读先于回消息显示）
   const readDelay = Math.min(delay * 0.45, 1800);
@@ -5520,10 +5570,45 @@ function renderOtherMoment(chatId) {
    表情包
    ════════════════════════════════════════════════════════════ */
 function renderEmojis() {
-  // emojiLib 仅供角色自动回复使用，用户端不再提供 Emoji 字符发送功能
-  const grid = document.getElementById('emojiGrid');
+  const grid = document.getElementById('emojiLibGrid');
   if (!grid) return;
-  grid.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-hint);font-size:12px;">Emoji 字符库仅供角色回复时使用</div>';
+  const lib = appData.emojiLib || [];
+  grid.innerHTML = '';
+  if (lib.length === 0) {
+    grid.innerHTML = '<div style="width:100%;text-align:center;color:var(--text-hint);font-size:12px;padding:40px 0;">还没有 Emoji，点右上角 + 添加</div>';
+    return;
+  }
+  lib.forEach((em, idx) => {
+    const el = document.createElement('div');
+    el.style.cssText = 'position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:24px;border-radius:8px;background:var(--surface-2);border:0.5px solid var(--border);cursor:pointer;flex-shrink:0;';
+    el.title = '点击删除';
+    el.textContent = em;
+    el.onclick = () => { deleteEmojiLibItem(idx); };
+    grid.appendChild(el);
+  });
+}
+
+function addEmojiLibItems() {
+  const textarea = document.getElementById('newEmojiLibText');
+  if (!textarea) return;
+  // 用 Intl.Segmenter 或 spread 拆分单个 emoji
+  const raw = textarea.value.trim();
+  if (!raw) { showToast('请输入 Emoji'); return; }
+  const segments = [...new Intl.Segmenter().segment(raw)].map(s => s.segment).filter(s => s.trim());
+  if (segments.length === 0) { showToast('未识别到有效 Emoji'); return; }
+  if (!appData.emojiLib) appData.emojiLib = [];
+  appData.emojiLib.push(...segments);
+  textarea.value = '';
+  saveData();
+  renderEmojis();
+  closeModal();
+  showToast(`已添加 ${segments.length} 个 Emoji`);
+}
+
+function deleteEmojiLibItem(idx) {
+  appData.emojiLib.splice(idx, 1);
+  saveData();
+  renderEmojis();
 }
 
 /* ── 表情包管理页 tab 切换 ── */
@@ -5654,7 +5739,7 @@ function renderEmojiInputPanel(tab) {
 
   // 只处理 sticker（表情包），忽略 emoji tab
   content.innerHTML = '';
-  content.style.gridTemplateColumns = 'repeat(4,1fr)';
+  content.style.gridTemplateColumns = 'repeat(3,1fr)';
 
   const packs = appData.myEmojiPacks || [];
   if (packs.length === 0) {
@@ -6323,6 +6408,12 @@ function openModal(id) {
       }
     }
   }
+  // 打开添加词卡时，动态刷新分组下拉
+  if (id === 'addCard') {
+    populateAddCardGroupSelect();
+    const ta = document.getElementById('newCardText');
+    if (ta) ta.value = '';
+  }
   // 重置添加联系人头像状态
   if (id === 'addContact') {
     window._newContactAvatarData = '';
@@ -6430,9 +6521,16 @@ function syncProfileUI() {
   if (valEl)  valEl.textContent = noReplyRate + '%';
 
   const fastEl = document.getElementById('fastestReplyInput');
-  if (fastEl) fastEl.value = s.fastestReply || 3;
+  const fastUnitEl = document.getElementById('fastestReplyUnit');
+  if (fastEl) {
+    const fastData = s.fastestReplyData || { value: s.fastestReply || 3, unit: 'sec' };
+    fastEl.value = fastData.value;
+    if (fastUnitEl) fastUnitEl.value = fastData.unit || 'sec';
+  }
   const slowEl = document.getElementById('slowestReplyInput');
+  const slowUnitEl = document.getElementById('slowestReplyUnit');
   if (slowEl) slowEl.value = s.slowestReply?.value || 1;
+  if (slowUnitEl) slowUnitEl.value = s.slowestReply?.unit || 'min';
 
   const cardsMin = document.getElementById('cardsMinInput');
   const cardsMax = document.getElementById('cardsMaxInput');
@@ -6466,10 +6564,28 @@ function updateNoReplyRate(val) {
 function updateReplySpeed(type, val) {
   const v = Math.max(1, parseInt(val) || 1);
   if (type === 'fastest') {
-    appData.settings.fastestReply = v;
+    if (!appData.settings.fastestReplyData) appData.settings.fastestReplyData = { value: 3, unit: 'sec' };
+    appData.settings.fastestReplyData.value = v;
+    // 兼容旧字段：统一转换为毫秒
+    appData.settings.fastestReply = appData.settings.fastestReplyData.unit === 'min' ? v * 60 : v;
   } else {
     if (!appData.settings.slowestReply) appData.settings.slowestReply = { value: 1, unit: 'min' };
     appData.settings.slowestReply.value = v;
+  }
+  saveData();
+}
+
+/** 回复速度单位切换 */
+function updateReplySpeedUnit(type, unit) {
+  if (type === 'fastest') {
+    if (!appData.settings.fastestReplyData) appData.settings.fastestReplyData = { value: 3, unit: 'sec' };
+    appData.settings.fastestReplyData.unit = unit;
+    appData.settings.fastestReply = unit === 'min'
+      ? appData.settings.fastestReplyData.value * 60
+      : appData.settings.fastestReplyData.value;
+  } else {
+    if (!appData.settings.slowestReply) appData.settings.slowestReply = { value: 1, unit: 'min' };
+    appData.settings.slowestReply.unit = unit;
   }
   saveData();
 }
@@ -7122,17 +7238,34 @@ function saveEditContact() {
    ════════════════════════════════════════════════════════════ */
 let selectedCardIndices = new Set();
 let currentCardGroup    = null;
+let groupChipsExpanded  = false;   // 分组折叠状态
 
 function renderCards() {
   const toolbar = document.getElementById('cardToolbar');
   const groups  = Object.keys(appData.wordCardGroups);
+  const FOLD_THRESHOLD = 5;  // 超过此数量时折叠
 
-  // 工具栏：分组 chips + 管理按钮
+  // 判断是否需要折叠
+  const needFold = groups.length > FOLD_THRESHOLD;
+  const showGroups = (needFold && !groupChipsExpanded)
+    ? groups.slice(0, FOLD_THRESHOLD)
+    : groups;
+
+  const foldBtn = needFold
+    ? `<button class="group-chip" style="background:var(--surface-3,#f0f0f0);border-style:dashed;"
+         onclick="groupChipsExpanded=!groupChipsExpanded;renderCards()">
+         ${groupChipsExpanded
+           ? '<i class="fa-solid fa-chevron-up" style="font-size:10px;"></i> 收起'
+           : `<i class="fa-solid fa-chevron-down" style="font-size:10px;"></i> 展开全部(${groups.length})`}
+       </button>`
+    : '';
+
   toolbar.innerHTML = `
     <div class="group-chip${!currentCardGroup ? ' active' : ''}" onclick="filterCardGroup(null,this)">全部</div>
-    ${groups.map(g =>
+    ${showGroups.map(g =>
       `<div class="group-chip${currentCardGroup === g ? ' active' : ''}" onclick="filterCardGroup('${escHtml(g)}',this)">${escHtml(g)}</div>`
     ).join('')}
+    ${foldBtn}
     <button class="btn cancel" style="margin-left:auto;padding:4px 10px;font-size:11px;" onclick="openGroupManage()">管理分组</button>
   `;
 
@@ -7345,18 +7478,35 @@ function openGroupManage() {
   openModal('groupManage');
 }
 
+/* 统一刷新 addCard modal 中的分组下拉，每次打开前调用 */
+function populateAddCardGroupSelect() {
+  const sel = document.getElementById('newCardGroup');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const groups = Object.keys(appData.wordCardGroups);
+  if (groups.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = '（暂无分组，请先创建）';
+    sel.appendChild(opt);
+  } else {
+    groups.forEach(g => {
+      const opt = document.createElement('option');
+      opt.value = g; opt.textContent = g;
+      if (g === prev) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+}
+
 function addNewGroup() {
   const name = document.getElementById('newGroupName').value.trim();
   if (!name) { showToast('请输入分组名'); return; }
   if (appData.wordCardGroups[name]) { showToast('分组已存在'); return; }
   appData.wordCardGroups[name] = [];
-  // 更新 addCard modal 的下拉
-  const sel = document.getElementById('newCardGroup');
-  const opt = document.createElement('option');
-  opt.value = name; opt.textContent = name;
-  sel.appendChild(opt);
   document.getElementById('newGroupName').value = '';
   saveData();
+  populateAddCardGroupSelect();
   openGroupManage();
   renderCards();
   showToast(`已添加分组：${name}`);
@@ -7367,6 +7517,7 @@ function deleteGroup(name) {
   delete appData.wordCardGroups[name];
   saveData();
   if (currentCardGroup === name) currentCardGroup = null;
+  populateAddCardGroupSelect();
   renderCards();
   openGroupManage();
 }
