@@ -1537,7 +1537,7 @@ body {
 }
 .ep-emoji-item:hover { background: var(--primary-light); transform: scale(1.15); }
 .ep-emoji-item.img-type img {
-  width: 100%; height: 100%; object-fit: cover; border-radius: 4px;
+  width: 100%; height: 100%; object-fit: contain; border-radius: 4px; padding: 2px;
 }
 /* Emoji panel - text tab */
 .emoji-text-grid {
@@ -2023,7 +2023,7 @@ body {
             </div>
             <button onclick="document.getElementById('emojiInputPanel').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--text-hint);cursor:pointer;padding:0 8px;font-size:14px;">✕</button>
           </div>
-          <div id="eiContent" style="overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px;-webkit-overflow-scrolling:touch;"></div>
+          <div id="eiContent" style="overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:10px;-webkit-overflow-scrolling:touch;"></div>
         </div>
         <!-- 词卡选择面板 -->
         <div id="cardInputPanel" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--glass-bg);backdrop-filter:blur(16px);border-top:0.5px solid var(--border);z-index:20;flex-direction:column;max-height:220px;">
@@ -2238,6 +2238,21 @@ body {
           <div><div class="settings-label">Emoji 混合模式</div><div class="settings-desc">Emoji 附在文字内，而不单独发送</div></div>
           <div class="toggle" id="emojiMixModeToggle" onclick="toggleSetting('emojiMixMode')"></div>
         </div>
+
+        <!-- Emoji 附带概率 -->
+        <div class="settings-item" style="flex-direction:column;align-items:stretch;gap:8px;cursor:default;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="settings-icon" style="background:var(--primary-light);color:var(--primary-deep);"><i class="fa-regular fa-face-grin-stars"></i></div>
+            <div style="flex:1;"><div class="settings-label">Emoji 附带概率</div><div class="settings-desc">角色回复时从 Emoji 库随机附带的概率</div></div>
+            <div class="settings-right"><span id="emojiProbVal" style="font-family:monospace;color:var(--primary-deep);font-weight:500;">20%</span></div>
+          </div>
+          <div style="padding:0 6px 4px;">
+            <input type="range" id="emojiProbSlider" min="0" max="100" step="5" value="20"
+              oninput="updateEmojiProb(this.value)"
+              style="width:100%;accent-color:var(--primary-deep);cursor:pointer;">
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-hint);margin-top:2px;"><span>0%</span><span>50%</span><span>100%</span></div>
+          </div>
+        </div>
         <div class="settings-item">
           <div class="settings-icon" style="background:var(--primary-light);color:var(--primary-deep);"><i class="fa-solid fa-reply"></i></div>
           <div><div class="settings-label">引用回复</div><div class="settings-desc">角色有概率引用你的消息回复（视觉效果）</div></div>
@@ -2383,12 +2398,22 @@ body {
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="wordCardGroups" checked> 词卡分组</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="blockedWords"> 屏蔽词</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="statusCards" checked> 在线状态库</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="statusCardGroups" checked> 状态分组</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="myEmojiPacks"> 我的表情包</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="hisEmojiPacks"> 对方表情包</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="emojiLib"> 表情符号快捷库</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="moments"> 朋友圈动态</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="momentNotifications"> 朋友圈通知</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="mutedMoments"> 屏蔽动态</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="mailbox"> 双人信箱</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="patMessages"> 拍一拍文案</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="disabledPatIndices"> 拍一拍禁用设置</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="signatures"> 签名库</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="chatSignatures"> 签名分配</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="userProfile"> 个人资料</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="userAvatar"> 我的头像</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="decideQuestions"> 今日决定题库</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="listenSong"> 歌单</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="settings" checked> 设置</label>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
@@ -2707,7 +2732,7 @@ body {
             </button>
             <input type="file" id="myEmojiUpload" accept="image/*" multiple style="display:none" onchange="addMyEmoji(this)">
           </div>
-          <div id="myEmojiGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;overflow-y:auto;flex:1;"></div>
+          <div id="myEmojiGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px;overflow-y:auto;flex:1;"></div>
         </div>
         <!-- 对方表情包 -->
         <div id="emojiTabHis" style="flex:1;display:flex;flex-direction:column;overflow:hidden;display:none;">
@@ -2718,7 +2743,7 @@ body {
             </button>
             <input type="file" id="hisEmojiUpload" accept="image/*" multiple style="display:none" onchange="addHisEmoji(this)">
           </div>
-          <div id="hisEmojiGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;overflow-y:auto;flex:1;"></div>
+          <div id="hisEmojiGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px;overflow-y:auto;flex:1;"></div>
         </div>
         <!-- Emoji 字符库（角色绘画时随机插入） -->
         <div id="emojiTabLib" style="display:none;flex-direction:column;overflow:hidden;flex:1;">
@@ -2810,12 +2835,8 @@ body {
 <div class="nudge-sheet" id="nudgeSheet" onclick="closeNudge(event)">
   <div class="nudge-content">
     <div class="nudge-handle"></div>
-    <div class="nudge-title" id="nudgeTitle">戳一戳</div>
-    <div class="nudge-item" onclick="doNudge('轻轻戳了一下')"><i class="fa-solid fa-hand-point-right"></i>轻轻戳了一下</div>
-    <div class="nudge-item" onclick="doNudge('戳了戳')"><i class="fa-solid fa-hand-point-right"></i>戳了戳</div>
-    <div class="nudge-item" onclick="doNudge('使劲戳了一下')"><i class="fa-solid fa-hand-point-right"></i>使劲戳了一下</div>
-    <div class="nudge-item" onclick="doNudge('悄悄戳了一下')"><i class="fa-solid fa-hand-point-right"></i>悄悄戳了一下</div>
-    <div class="nudge-item" onclick="doNudge('挠了挠')"><i class="fa-solid fa-hand-point-right"></i>挠了挠</div>
+    <div class="nudge-title" id="nudgeTitle">拍一拍</div>
+    <div id="nudgeItemsContainer"></div>
   </div>
 </div>
 
@@ -3252,7 +3273,7 @@ body {
       <div style="margin-top:10px;">
         <div style="font-size:11px;color:var(--text-hint);margin-bottom:6px;">占位符：<span class="action-tag" onclick="insertPatPlaceholder('{角色}')" style="cursor:pointer;">{角色}</span> <span class="action-tag" onclick="insertPatPlaceholder('{我}')" style="cursor:pointer;">{我}</span></div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input class="modal-input" type="text" placeholder="新文案，支持 {角色} 占位符" id="newPatText" style="flex:1;margin-bottom:0;">
+          <input class="modal-input" type="text" placeholder="新文案，支持 {角色} 和 {我} 占位符" id="newPatText" style="flex:1;margin-bottom:0;">
           <button class="btn primary" style="padding:7px 14px;font-size:12px;flex-shrink:0;" onclick="addPatItem()"><i class="fa-solid fa-plus"></i> 添加</button>
         </div>
       </div>
@@ -3354,7 +3375,18 @@ const DEFAULT_DATA = {
     '{角色}被你戳了一下',
     '你使劲拍了拍{角色}',
     '你轻轻碰了碰{角色}',
-    '你悄悄捏了捏{角色}的脸'
+    '你悄悄捏了捏{角色}的脸',
+    '{我}拍了拍{角色}',
+    '{我}轻轻拍了拍{角色}',
+    '{我}悄悄戳了戳{角色}',
+    '{我}使劲拍了拍{角色}',
+    '{我}碰了碰{角色}',
+    '{角色}被{我}轻轻捏了捏脸',
+    '{我}拍了拍{角色}的头',
+    '{我}悄悄捏了捏{角色}的手',
+    '{角色}被{我}轻拍了一下',
+    '{我}偷偷拍了拍{角色}',
+    '{角色}被{我}戳了个措手不及'
   ],
   disabledPatIndices: [],
   moments: [],
@@ -3413,6 +3445,7 @@ const DEFAULT_DATA = {
     noReplyRate: 20,
     replyQuote: false,
     momentProb: 25,
+    emojiProb: 20,
   }
 };
 
@@ -3495,6 +3528,17 @@ async function loadDataAsync() {
     // 将 IDB 完整数据（含图片）作为基础，再把内存里的当前 appData 覆盖上去，
     // 保留用户在 IDB 加载完成前做的所有改动
     const idbBase = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+    // ★★ 关键修复：对用户自定义数组（statusCards / myEmojiPacks / hisEmojiPacks 等），
+    // 若内存 appData 里该数组与 DEFAULT_DATA 完全相同（说明 localStorage 超限丢失，内存只有默认值），
+    // 则优先保留 IDB 里的用户数据，避免用默认值覆盖用户数据。
+    const USER_ARRAY_KEYS = ['statusCards','statusCardGroups','myEmojiPacks','hisEmojiPacks','emojiLib','blockedWords','patMessages','disabledPatIndices','moments'];
+    const memIsDefault = (key) => JSON.stringify(appData[key]) === JSON.stringify(DEFAULT_DATA[key]);
+    for (const k of USER_ARRAY_KEYS) {
+      if (memIsDefault(k) && idbBase[k] !== undefined) {
+        // 内存里的值等于默认值，说明本次启动没有加载到持久化数据，用 IDB 值替代
+        appData[k] = idbBase[k];
+      }
+    }
     appData = deepMerge(idbBase, appData);
     _idbReady = true; // IDB 完整数据已加载，后续 saveData 可安全写入
     // 立即把合并后的完整数据写回 IDB，确保图片等大数据也得到保留
@@ -4227,13 +4271,14 @@ function _sendOneAutoReply(chat, activeCards, settings) {
     pieces.push(activeCards[Math.floor(Math.random() * activeCards.length)]);
   }
 
-  // ── Emoji 附带（每张字卡独立 20% 概率）
+  // ── Emoji 附带（每张字卡独立概率，由设置控制）
   const emojiMix = settings.emojiMixMode;
   const emojiLib = appData.emojiLib || [];
+  const emojiProb = (settings.emojiProb ?? 20) / 100;
   let emojiToSendAlone = null; // 非混合模式要单独发的 emoji
 
   pieces = pieces.map(piece => {
-    if (emojiLib.length > 0 && Math.random() < 0.2) {
+    if (emojiLib.length > 0 && Math.random() < emojiProb) {
       const em = emojiLib[Math.floor(Math.random() * emojiLib.length)];
       if (emojiMix) {
         // 混合模式：前/后各 50%
@@ -5640,7 +5685,7 @@ function renderMyEmojiGrid() {
     const box = document.createElement('div');
     box.style.cssText = 'position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:0.5px solid var(--border);background:var(--surface-2);cursor:pointer;';
     box.innerHTML = `
-      <img src="${src}" style="width:100%;height:100%;object-fit:cover;" onclick="sendMySticker(${idx})">
+      <img src="${src}" style="width:100%;height:100%;object-fit:contain;padding:3px;" onclick="sendMySticker(${idx})">
       <button onclick="deleteMyEmoji(${idx})" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.5);border:none;color:#fff;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
     `;
     grid.appendChild(box);
@@ -5664,7 +5709,7 @@ function renderHisEmojiGrid() {
     const box = document.createElement('div');
     box.style.cssText = 'position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:0.5px solid var(--border);background:var(--surface-2);';
     box.innerHTML = `
-      <img src="${src}" style="width:100%;height:100%;object-fit:cover;">
+      <img src="${src}" style="width:100%;height:100%;object-fit:contain;padding:3px;">
       <button onclick="deleteHisEmoji(${idx})" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.5);border:none;color:#fff;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
     `;
     grid.appendChild(box);
@@ -5739,7 +5784,7 @@ function renderEmojiInputPanel(tab) {
 
   // 只处理 sticker（表情包），忽略 emoji tab
   content.innerHTML = '';
-  content.style.gridTemplateColumns = 'repeat(3,1fr)';
+  content.style.gridTemplateColumns = 'repeat(4,1fr)';
 
   const packs = appData.myEmojiPacks || [];
   if (packs.length === 0) {
@@ -5756,8 +5801,8 @@ function renderEmojiInputPanel(tab) {
   validPacks.forEach((src, idx) => {
     const el = document.createElement('div');
     el.className = 'ep-emoji-item img-type';
-    el.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;transition:transform .12s;';
-    el.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:4px;">`;
+    el.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;transition:transform .12s;background:var(--surface-2);border:0.5px solid var(--border);';
+    el.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:contain;border-radius:4px;padding:2px;">`;
     el.onclick = () => {
       if (!currentChatId) { showToast('请先打开聊天'); return; }
       const chat = getChatById(currentChatId);
@@ -6315,7 +6360,7 @@ function rejectIncoming(auto = false) {
    戳一戳
    ════════════════════════════════════════════════════════════ */
 function openNudge() {
-  document.getElementById('nudgeSheet').classList.add('open');
+  openPatModal();
 }
 function closeNudge(e) {
   if (e.target === e.currentTarget) document.getElementById('nudgeSheet').classList.remove('open');
@@ -6543,6 +6588,12 @@ function syncProfileUI() {
   if (mpSlider) mpSlider.value = mp;
   if (mpVal)    mpVal.textContent = mp + '%';
 
+  const epSlider = document.getElementById('emojiProbSlider');
+  const epVal    = document.getElementById('emojiProbVal');
+  const ep = s.emojiProb ?? 20;
+  if (epSlider) epSlider.value = ep;
+  if (epVal)    epVal.textContent = ep + '%';
+
   // 主动回复最大间隔
   const amMaxSlider = document.getElementById('autoMsgMaxSlider');
   const amMaxVal    = document.getElementById('autoMsgMaxVal');
@@ -6603,6 +6654,15 @@ function updateMomentProb(val) {
   const v = parseInt(val) || 0;
   appData.settings.momentProb = v;
   const el = document.getElementById('momentProbVal');
+  if (el) el.textContent = v + '%';
+  saveData();
+}
+
+/** Emoji 附带概率滑块 */
+function updateEmojiProb(val) {
+  const v = parseInt(val) || 0;
+  appData.settings.emojiProb = v;
+  const el = document.getElementById('emojiProbVal');
   if (el) el.textContent = v + '%';
   saveData();
 }
@@ -8212,12 +8272,22 @@ function exportPartialData() {
     wordCardGroups: '词卡分组',
     blockedWords: '屏蔽词',
     statusCards: '在线状态',
+    statusCardGroups: '状态分组',
     myEmojiPacks: '我的表情包',
     hisEmojiPacks: '对方表情包',
+    emojiLib: '表情符号快捷库',
     moments: '朋友圈',
+    momentNotifications: '朋友圈通知',
+    mutedMoments: '屏蔽动态',
     mailbox: '双人信箱',
     patMessages: '拍一拍',
+    disabledPatIndices: '拍一拍禁用设置',
     signatures: '签名库',
+    chatSignatures: '签名分配',
+    userProfile: '个人资料',
+    userAvatar: '我的头像',
+    decideQuestions: '今日决定题库',
+    listenSong: '歌单',
     settings: '设置'
   };
   const labels = checks.map(k => labelMap[k] || k);
@@ -8366,6 +8436,53 @@ async function importPartial(input) {
           } else if (key === 'userProfile' && typeof src === 'object') {
             appData.userProfile = Object.assign({}, appData.userProfile || {}, src);
             succeededKeys.push(labelMap[key] || key);
+          } else if (key === 'userAvatar' && typeof src === 'string') {
+            appData.userAvatar = src;
+            if (appData.userProfile) appData.userProfile.avatar = src;
+            succeededKeys.push(labelMap[key] || key);
+          } else if (key === 'emojiLib' && Array.isArray(src)) {
+            // 表情符号快捷库：按字符串去重追加
+            const existing = new Set(appData.emojiLib || []);
+            const toAdd = src.filter(e => !existing.has(e));
+            appData.emojiLib = [...(appData.emojiLib || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 个）`);
+          } else if (key === 'decideQuestions' && Array.isArray(src)) {
+            // 今日决定题库：按 question 文本去重追加
+            const existingQs = new Set((appData.decideQuestions || []).map(q => q.question || q));
+            const toAdd = src.filter(q => !existingQs.has(q.question || q));
+            appData.decideQuestions = [...(appData.decideQuestions || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'listenSong' && typeof src === 'object') {
+            // 歌单：按歌曲 id 去重追加；当前播放等运行时字段保留现有值
+            if (!appData.listenSong) appData.listenSong = { playlist: [], bubbles: [] };
+            if (Array.isArray(src.playlist)) {
+              const existingIds = new Set((appData.listenSong.playlist || []).map(s => s.id));
+              const toAdd = src.playlist.filter(s => !existingIds.has(s.id));
+              appData.listenSong.playlist = [...(appData.listenSong.playlist || []), ...toAdd];
+            }
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${(src.playlist||[]).length} 首）`);
+          } else if (key === 'momentNotifications' && Array.isArray(src)) {
+            const existingIds = new Set((appData.momentNotifications || []).map(n => n.id));
+            const toAdd = src.filter(n => !existingIds.has(n.id));
+            appData.momentNotifications = [...(appData.momentNotifications || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'mutedMoments' && Array.isArray(src)) {
+            const existing = new Set(appData.mutedMoments || []);
+            const toAdd = src.filter(id => !existing.has(id));
+            appData.mutedMoments = [...(appData.mutedMoments || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'disabledPatIndices' && Array.isArray(src)) {
+            const existing = new Set(appData.disabledPatIndices || []);
+            const toAdd = src.filter(i => !existing.has(i));
+            appData.disabledPatIndices = [...(appData.disabledPatIndices || []), ...toAdd];
+            succeededKeys.push(labelMap[key] || key);
+          } else if (key === 'chatSignatures' && typeof src === 'object') {
+            if (!appData.chatSignatures) appData.chatSignatures = {};
+            // 合并：现有签名保留，来源中新的补充进去
+            for (const [cid, csig] of Object.entries(src)) {
+              if (!appData.chatSignatures[cid]) appData.chatSignatures[cid] = csig;
+            }
+            succeededKeys.push(`${labelMap[key] || key}（处理 ${Object.keys(src).length} 条）`);
           } else {
             // 其他字段：直接覆盖
             appData[key] = src;
