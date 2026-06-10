@@ -2263,9 +2263,14 @@ body {
         </div>
 
         <div class="settings-section-title" style="margin-top:8px;">数据备份</div>
-        <div class="settings-item" onclick="exportData()">
-          <div class="settings-icon" style="background:#e3f2fd;color:#1976d2;"><i class="fa-solid fa-download"></i></div>
-          <div><div class="settings-label">导出备份</div><div class="settings-desc">导出全部数据为 JSON</div></div>
+        <div class="settings-item" onclick="exportFullBackup()">
+          <div class="settings-icon" style="background:#e3f2fd;color:#1976d2;"><i class="fa-solid fa-database"></i></div>
+          <div><div class="settings-label">全量备份</div><div class="settings-desc">导出全部数据（含字卡、头像等）</div></div>
+          <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
+        </div>
+        <div class="settings-item" onclick="switchView('dataManage',null)">
+          <div class="settings-icon" style="background:#e8eaf6;color:#3949ab;"><i class="fa-solid fa-sliders"></i></div>
+          <div><div class="settings-label">单独备份</div><div class="settings-desc">按模块选择导出部分数据</div></div>
           <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
         </div>
         <div class="settings-item" onclick="triggerImport()">
@@ -2345,7 +2350,7 @@ body {
         <div class="settings-section-title" style="margin-top:8px;">数据管理</div>
         <div class="settings-item" onclick="switchView('dataManage',null)">
           <div class="settings-icon" style="background:#e0f7fa;color:#00838f;"><i class="fa-solid fa-database"></i></div>
-          <div><div class="settings-label">分项备份</div><div class="settings-desc">按模块导出/导入数据</div></div>
+          <div><div class="settings-label">单独备份</div><div class="settings-desc">按模块选择导出部分数据</div></div>
           <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
         </div>
       </div>
@@ -2355,7 +2360,7 @@ body {
          │  视图 7 · dataManageView        │
          └──────────────────────────────────┘ -->
     <div class="main-view" id="viewDataManage">
-      <div class="detail-header"><span class="char-name">分项备份</span></div>
+      <div class="detail-header"><span class="char-name">单独备份</span></div>
       <div class="settings-list" style="padding:12px;">
         <div class="settings-section-title">选择要导出的数据</div>
         <div id="backupCheckList">
@@ -2373,10 +2378,10 @@ body {
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="settings" checked> 设置</label>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <button class="btn cancel" style="flex:1;" onclick="selectAllBackup(true)">全选</button>
-          <button class="btn cancel" style="flex:1;" onclick="selectAllBackup(false)">取消全选</button>
+          <button class="btn cancel" style="flex:1;" onclick="selectAllBackupItems(true)">全选</button>
+          <button class="btn cancel" style="flex:1;" onclick="selectAllBackupItems(false)">取消全选</button>
         </div>
-        <button class="btn primary" style="margin-top:12px;width:100%;" onclick="exportPartial()"><i class="fa-solid fa-download"></i> 导出所选</button>
+        <button class="btn primary" style="margin-top:12px;width:100%;" onclick="exportPartialData()"><i class="fa-solid fa-download"></i> 导出所选</button>
         <div class="settings-section-title" style="margin-top:16px;">导入分项数据</div>
         <p style="font-size:12px;color:var(--text-sub);margin-bottom:8px;">导入后将与现有数据合并（不覆盖）</p>
         <button class="btn cancel" style="width:100%;" onclick="triggerPartialImport()"><i class="fa-solid fa-upload"></i> 选择 JSON 文件导入</button>
@@ -3436,6 +3441,10 @@ async function loadDataAsync() {
     renderMoments();
     renderMailList();
     syncProfileUI();
+    // 恢复含图片的渲染（IDB 数据含完整 base64）
+    renderMyEmojiGrid();
+    renderHisEmojiGrid();
+    renderCards();
   } catch (e) {
     console.warn('[MultiChat] loadDataAsync error:', e);
   }
@@ -3723,7 +3732,10 @@ function selectChat(id) {
   currentChatId = id;
   appData.settings.currentChatId = id;
   const chat = getChatById(id);
-  if (chat) chat.unread = 0;
+  if (chat) {
+    chat.unread = 0;
+    chat._statusText = null; // 每次打开聊天重新随机状态
+  }
   renderChatList();
   renderMobileChatList();
   renderMessages(id);
@@ -3746,13 +3758,20 @@ function updateChatHeader(id) {
     avEl.innerHTML = chat.avatar ? `<img src="${chat.avatar}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : escHtml(chat.emoji || chat.name.charAt(0));
   }
   if (nameEl) nameEl.textContent = chat.name;
-  if (statEl) statEl.textContent = randomStatus();
+  // 每次打开聊天时随机一次状态，并缓存到 chat._statusText，后续不再随消息而变
+  if (!chat._statusText) chat._statusText = randomStatus(chat);
+  if (statEl) {
+    statEl.textContent = chat._statusText;
+    statEl.style.color = chat.online ? 'var(--online)' : 'var(--text-hint)';
+  }
   // 更新戳一戳标题
   const nudgeTitle = document.getElementById('nudgeTitle');
   if (nudgeTitle) nudgeTitle.textContent = `戳一戳 ${chat.name}`;
 }
 
-function randomStatus() {
+function randomStatus(chat) {
+  // 如果 chat 处于离线状态，直接显示离线
+  if (chat && !chat.online) return '离线';
   const pool = appData.statusCards || ['在线'];
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -4038,11 +4057,11 @@ function triggerAutoReply(chat, triggeredMsgId) {
     : settings.slowestReply.value * 1000;
   const delay = fastest + Math.random() * Math.max(0, slowestMs - fastest);
 
-  // ── 已读标记时序
-  const readDelay = Math.min(3000, delay * 0.6);
+  // ── 已读标记：仅写内存，不提前 render（避免已读先于回消息显示）
+  const readDelay = Math.min(delay * 0.45, 1800);
   setTimeout(() => {
     const t = chat.messages.find(m => m.id === triggeredMsgId);
-    if (t) { t.read = true; saveData(); if (currentChatId === chat.id) renderMessages(chat.id); renderChatList(); }
+    if (t) { t.read = true; } // 只写内存，等发回复时一起刷新
   }, readDelay);
 
   // ── 显示"正在输入…"
@@ -4051,14 +4070,14 @@ function triggerAutoReply(chat, triggeredMsgId) {
       const statEl = document.getElementById('headerStatus');
       if (statEl) statEl.textContent = '对方正在输入…';
     }
-  }, readDelay + 300);
+  }, readDelay + 200);
 
   // ── 生成并发送回复
   setTimeout(() => {
-    // 恢复头部状态
+    // 恢复头部状态（恢复到本次打开聊天时固定的状态，不随每条消息变化）
     if (currentChatId === chat.id) {
       const statEl = document.getElementById('headerStatus');
-      if (statEl) statEl.textContent = randomStatus();
+      if (statEl) statEl.textContent = chat._statusText || randomStatus();
     }
 
     // 有效字卡
@@ -4146,7 +4165,7 @@ function _sendOneAutoReply(chat, activeCards, settings) {
     return piece;
   });
 
-  const replyText = pieces.join('');
+  const replyText = pieces.join(' ');
 
   // ── 引用回复（30% 概率，引用最近 10 条自己的消息之一）
   let replyTo = null;
@@ -4187,8 +4206,9 @@ function _sendOneAutoReply(chat, activeCards, settings) {
   }
 
   // ── hisEmojiPacks 图片附带（每条 20% 概率）
-  if (appData.hisEmojiPacks && appData.hisEmojiPacks.length > 0 && Math.random() < 0.2) {
-    const imgSrc = appData.hisEmojiPacks[Math.floor(Math.random() * appData.hisEmojiPacks.length)];
+  const _validHisPacks = (appData.hisEmojiPacks || []).filter(s => !!s);
+  if (_validHisPacks.length > 0 && Math.random() < 0.2) {
+    const imgSrc = _validHisPacks[Math.floor(Math.random() * _validHisPacks.length)];
     setTimeout(() => {
       const imgMsg = {
         id: Date.now() + Math.random(), from: 'other', type: 'image',
@@ -4515,8 +4535,26 @@ function insertCard() {
 }
 
 /* ── plus 面板 ── */
-function togglePlus() { plusOpen = !plusOpen; document.getElementById('plusPanel').classList.toggle('open', plusOpen); }
-function closePlus()  { plusOpen = false;  document.getElementById('plusPanel').classList.remove('open'); }
+function togglePlus() {
+  plusOpen = !plusOpen;
+  document.getElementById('plusPanel').classList.toggle('open', plusOpen);
+  // 关闭表情和词卡面板
+  const ep = document.getElementById('emojiInputPanel');
+  const cp = document.getElementById('cardInputPanel');
+  if (ep) ep.style.display = 'none';
+  if (cp) cp.style.display = 'none';
+}
+function closePlus() { plusOpen = false; document.getElementById('plusPanel').classList.remove('open'); }
+
+// 点击面板外部关闭加号面板
+document.addEventListener('click', function(e) {
+  if (!plusOpen) return;
+  const panel = document.getElementById('plusPanel');
+  const btn   = document.getElementById('plusBtn');
+  if (panel && !panel.contains(e.target) && btn && !btn.contains(e.target)) {
+    closePlus();
+  }
+}, true);
 
 /* ── 下拉菜单 ── */
 function toggleHeaderMore(btn) {
@@ -5358,10 +5396,11 @@ function renderMyEmojiGrid() {
   }
   grid.innerHTML = '';
   packs.forEach((src, idx) => {
+    if (!src) return; // 跳过被 _slimData 清空的占位符（IDB 加载后会自动恢复）
     const box = document.createElement('div');
     box.style.cssText = 'position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:0.5px solid var(--border);background:var(--surface-2);cursor:pointer;';
     box.innerHTML = `
-      <img src="${src}" style="width:100%;height:100%;object-fit:cover;" onclick="sendMySticker('${idx}')">
+      <img src="${src}" style="width:100%;height:100%;object-fit:cover;" onclick="sendMySticker(${idx})">
       <button onclick="deleteMyEmoji(${idx})" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.5);border:none;color:#fff;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
     `;
     grid.appendChild(box);
@@ -5381,6 +5420,7 @@ function renderHisEmojiGrid() {
   }
   grid.innerHTML = '';
   packs.forEach((src, idx) => {
+    if (!src) return; // 跳过占位符
     const box = document.createElement('div');
     box.style.cssText = 'position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:0.5px solid var(--border);background:var(--surface-2);';
     box.innerHTML = `
@@ -5468,7 +5508,12 @@ function renderEmojiInputPanel(tab) {
     </div>`;
     return;
   }
-  packs.forEach((src, idx) => {
+  const validPacks = packs.filter(s => !!s); // 过滤掉 _slimData 留下的空字符串
+  if (validPacks.length === 0) {
+    content.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--text-hint);font-size:12px;padding:20px 0;">还没有表情包，<span style="color:var(--primary-deep);cursor:pointer;" onclick="switchView('emoji',null);document.getElementById('emojiInputPanel').style.display='none'">去添加</span></div>`;
+    return;
+  }
+  validPacks.forEach((src, idx) => {
     const el = document.createElement('div');
     el.className = 'ep-emoji-item img-type';
     el.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;cursor:pointer;transition:transform .12s;';
@@ -6162,8 +6207,23 @@ function syncProfileUI() {
   const s = appData.settings;
   document.getElementById('myMomentsName').textContent = p.nickname;
   document.getElementById('myMomentsSign').textContent = p.signature;
-  document.getElementById('myMomentsAv').textContent   = p.nickname.charAt(0);
-  document.getElementById('railUserAv').textContent    = p.nickname.charAt(0);
+  // 同步头像（朋友圈、导航栏）
+  const _avEl = document.getElementById('myMomentsAv');
+  if (p.avatar) {
+    _avEl.innerHTML = `<img src="${p.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">`;
+  } else {
+    _avEl.innerHTML = '';
+    _avEl.textContent = p.nickname.charAt(0);
+  }
+  const _railAv = document.getElementById('railUserAv');
+  if (_railAv) {
+    if (p.avatar) {
+      _railAv.innerHTML = `<img src="${p.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    } else {
+      _railAv.innerHTML = '';
+      _railAv.textContent = p.nickname.charAt(0);
+    }
+  }
   document.getElementById('profileName').value = p.nickname;
   document.getElementById('profileSign').value = p.signature;
 
@@ -6255,13 +6315,21 @@ function updateAutoMsgMax(val) {
 /* ════════════════════════════════════════════════════════════
    备份/恢复
    ════════════════════════════════════════════════════════════ */
-function exportData() {
+function _dateStr() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return y + m + day;
+}
+function exportData() { exportFullBackup(); }
+function exportFullBackup() {
   const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'multichat-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.download = '全量备份（' + _dateStr() + '）.json';
   a.click();
-  showToast('备份已导出 📦');
+  showToast('全量备份已导出 📦');
 }
 function triggerImport() { document.getElementById('importInput').click(); }
 function importData(input) {
@@ -7691,13 +7759,31 @@ function exportPartialData() {
   const blob = new Blob([JSON.stringify(partial, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `multichat_partial_${Date.now()}.json`;
+  const labelMap = {
+    chats: '聊天记录',
+    wordCards: '词卡库',
+    wordCardGroups: '词卡分组',
+    blockedWords: '屏蔽词',
+    statusCards: '在线状态',
+    myEmojiPacks: '我的表情包',
+    hisEmojiPacks: '对方表情包',
+    moments: '朋友圈',
+    mailbox: '双人信箱',
+    patMessages: '拍一拍',
+    signatures: '签名库',
+    settings: '设置'
+  };
+  const labels = checks.map(k => labelMap[k] || k);
+  a.download = '（' + labels.join('）+（') + '）（' + _dateStr() + '）.json';
   a.click();
   showToast(`已导出 ${checks.length} 项数据`);
 }
 
 function toggleSelectAllBk(cb) {
   document.querySelectorAll('.bk-chk').forEach(c => c.checked = cb.checked);
+}
+function selectAllBackupItems(val) {
+  document.querySelectorAll('.bk-chk').forEach(c => c.checked = val);
 }
 
 /* ════════════════════════════════════════════════════════════
