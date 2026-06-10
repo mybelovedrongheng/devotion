@@ -2903,18 +2903,37 @@ body {
       <!-- 工具按钮 -->
       <button class="paint-tool-btn active" onclick="setPaintTool('line',this)" title="画笔" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;color:var(--text-sub);transition:all .15s;">✏️ 线</button>
       <button class="paint-tool-btn" onclick="setPaintTool('shape',this)" title="图形" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;color:var(--text-sub);transition:all .15s;">⬡ 形</button>
-      <button class="paint-tool-btn" onclick="setPaintTool('letter',this)" title="文字" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;color:var(--text-sub);transition:all .15s;">T 字</button>
+      <button class="paint-tool-btn" onclick="setPaintTool('letter',this)" title="文字" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;color:var(--text-sub);transition:all .15s;">A 字</button>
       <button class="paint-tool-btn" onclick="setPaintTool('eraser',this)" title="橡皮" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;color:var(--text-sub);transition:all .15s;">🧹 擦</button>
       <div style="width:1px;height:22px;background:var(--border);margin:0 2px;flex-shrink:0;"></div>
       <!-- 颜色 -->
-      <div id="paintColorPreview" onclick="document.getElementById('paintColorInput').click()" style="width:26px;height:26px;border-radius:50%;background:#e8a0b0;border:2px solid var(--border);cursor:pointer;flex-shrink:0;" title="选择颜色"></div>
-      <input type="color" id="paintColorInput" value="#e8a0b0" style="position:absolute;opacity:0;width:0;height:0;" onchange="setPaintColorFromPicker(this.value)">
+      <div id="paintColorPreview" onclick="document.getElementById('paintColorInput').click()" style="width:26px;height:26px;border-radius:50%;background:#e8a0b0;border:2px solid var(--border);cursor:pointer;flex-shrink:0;position:relative;" title="点击选色">
+        <input type="color" id="paintColorInput" value="#e8a0b0" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;border:none;padding:0;" onchange="setPaintColorFromPicker(this.value)">
+      </div>
       <div id="paintColorSwatches" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
       <div style="width:1px;height:22px;background:var(--border);margin:0 2px;flex-shrink:0;"></div>
-      <!-- 大小 -->
-      <span style="font-size:11px;color:var(--text-hint);">大小</span>
+      <!-- 大小（形状/线条时显示） -->
+      <span id="paintSizeLabel" style="font-size:11px;color:var(--text-hint);">大小</span>
       <input type="range" id="paintSizeSlider" min="2" max="40" value="12" style="width:70px;accent-color:var(--primary-deep);" oninput="setPaintSize(this.value)">
       <span id="paintSizeVal" style="font-size:11px;color:var(--text-sub);min-width:28px;">12px</span>
+    </div>
+    <!-- 形状选择器（shape工具时显示） -->
+    <div id="paintShapePanel" style="display:none;padding:8px 12px;border-bottom:0.5px solid var(--border);background:var(--surface-2);flex-shrink:0;">
+      <div style="font-size:11px;color:var(--text-hint);margin-bottom:6px;">点击形状放入画板（随机大小）：</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button onclick="placeShape('circle')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="圆形">⬤ 圆</button>
+        <button onclick="placeShape('triangle')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="三角形">▲ 三角</button>
+        <button onclick="placeShape('rect')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="矩形">▬ 矩形</button>
+        <button onclick="placeShape('star5')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="五角星">★ 五角星</button>
+        <button onclick="placeShape('diamond')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="菱形">◆ 菱形</button>
+        <button onclick="placeShape('hexagon')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="六边形">⬡ 六边形</button>
+        <button onclick="placeShape('heart')" style="padding:5px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;cursor:pointer;color:var(--text-sub);transition:all .15s;" title="心形">♥ 心形</button>
+      </div>
+    </div>
+    <!-- 字母网格（letter工具时显示） -->
+    <div id="paintLetterPanel" style="display:none;padding:8px 12px;border-bottom:0.5px solid var(--border);background:var(--surface-2);flex-shrink:0;">
+      <div style="font-size:11px;color:var(--text-hint);margin-bottom:6px;">点击字母随机放入画板（固定大小）：</div>
+      <div id="paintLetterGrid" style="display:flex;flex-wrap:wrap;gap:4px;max-height:90px;overflow-y:auto;"></div>
     </div>
     <!-- 画布 -->
     <div style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:10px;background:var(--bg);">
@@ -2963,7 +2982,12 @@ body {
       <button class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div class="modal-body" style="text-align:center;">
-      <div style="width:60px;height:60px;border-radius:50%;background:var(--primary-gradient);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:500;margin:0 auto 12px;box-shadow:0 4px 16px rgba(200,112,136,.3);">我</div>
+      <div id="profileAvPreview" onclick="document.getElementById('profileAvInput').click()"
+        style="width:60px;height:60px;border-radius:50%;background:var(--primary-gradient);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:500;margin:0 auto 6px;box-shadow:0 4px 16px rgba(200,112,136,.3);cursor:pointer;overflow:hidden;position:relative;">
+        <span id="profileAvLetter">我</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-hint);margin-bottom:10px;">点击更换头像</div>
+      <input type="file" id="profileAvInput" accept="image/*" style="display:none" onchange="previewProfileAvatar(this)">
       <input class="modal-input" type="text" placeholder="昵称" id="profileName" value="用户">
       <input class="modal-input" type="text" placeholder="签名" id="profileSign" value="今天也要开心呀 ✨">
     </div>
@@ -3428,9 +3452,11 @@ async function loadDataAsync() {
     if (!saved) {
       // IDB 无数据：将 localStorage 的数据迁移进去
       await _idbSet(DATA_KEY, appData);
+      _idbReady = true;
       return;
     }
     appData = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+    _idbReady = true; // IDB 完整数据已加载，后续 saveData 可安全写入
     // 同步主题和当前聊天
     setTheme(appData.settings.theme || 'pink', false);
     currentChatId = appData.settings.currentChatId || appData.chats[0]?.id || 1;
@@ -3454,11 +3480,13 @@ async function loadDataAsync() {
  * saveData() — 写入 IndexedDB（主存储），同时写一份不含大图片的副本到 localStorage（快速读取元数据）
  */
 function saveData() {
-  // 异步写 IndexedDB（完整数据含图片）
-  _idbSet(DATA_KEY, appData).catch(e => {
-    console.warn('[MultiChat] IDB saveData error:', e);
-    showToast('⚠️ 数据保存失败，请检查浏览器存储权限');
-  });
+  // 异步写 IndexedDB（完整数据含图片）—— 仅在 IDB 已就绪后写入，避免用精简数据覆盖完整数据
+  if (_idbReady) {
+    _idbSet(DATA_KEY, appData).catch(e => {
+      console.warn('[MultiChat] IDB saveData error:', e);
+      showToast('⚠️ 数据保存失败，请检查浏览器存储权限');
+    });
+  }
 
   // 同步写 localStorage（精简版，剥离 base64 图片以防超限）
   try {
@@ -3521,6 +3549,7 @@ function deepMerge(defaults, saved) {
 }
 
 /* ══════════════════════ 初始化 ══════════════════════ */
+let _idbReady = false; // IDB 完整数据加载完成前，禁止 saveData 写回 IDB
 let appData = loadData();
 let currentChatId = appData.settings.currentChatId || appData.chats[0]?.id || null;
 let currentView   = 'chat';
@@ -3571,6 +3600,9 @@ window.addEventListener('load', function() {
   syncProfileUI();
   detectMobile();
   scheduleIncomingCall(); // P6: 启动随机来电定时器
+
+  // 异步加载 IndexedDB 完整数据（含头像等大图）
+  loadDataAsync();
 });
 
 window.addEventListener('resize', detectMobile);
@@ -4325,6 +4357,48 @@ function _sendOneProactiveMsg(chat) {
 }
 
 /* ════════════════════════════════════════════════════════════
+   P3 · 角色绘画定时器：每 10 分钟 1% 概率自动发送随机绘画
+   ════════════════════════════════════════════════════════════ */
+const _charPaintTimers = {};
+const CHAR_PAINT_INTERVAL_MS = 10 * 60 * 1000; // 10 分钟
+const CHAR_PAINT_CHANCE = 0.01;                 // 1%
+
+function scheduleCharPaintTimers() {
+  (appData.chats || []).forEach(chat => {
+    if (!_charPaintTimers[chat.id]) {
+      _scheduleOneCharPaintTimer(chat.id);
+    }
+  });
+}
+
+function _scheduleOneCharPaintTimer(chatId) {
+  _charPaintTimers[chatId] = setTimeout(() => {
+    delete _charPaintTimers[chatId];
+    const chat = getChatById(chatId);
+    if (chat && Math.random() < CHAR_PAINT_CHANCE) {
+      const paintData = generateAutoPaint();
+      if (paintData) {
+        const msg = {
+          id: Date.now() + Math.random(), from: 'other', type: 'image',
+          src: paintData, text: '[绘画]', time: getTime(), read: false
+        };
+        chat.messages.push(msg);
+        if (currentChatId === chat.id) {
+          appendBubble(msg, chat);
+        } else {
+          chat.unread = (chat.unread || 0) + 1;
+          showTopNotification(chat, '[绘画 🎨]');
+        }
+        renderChatList();
+        saveData();
+      }
+    }
+    // 无论是否触发，都继续排队下一次
+    _scheduleOneCharPaintTimer(chatId);
+  }, CHAR_PAINT_INTERVAL_MS);
+}
+
+/* ════════════════════════════════════════════════════════════
    P3 / P5 · generateAutoPaint() & generateRandomPaint()
    在 P5 Canvas 完整实现前，用离屏 Canvas 生成简单图案
    ════════════════════════════════════════════════════════════ */
@@ -4727,6 +4801,8 @@ function addContact() {
     online: false, unread: 0, pinned: false,
     sign: sign || '', callBg: '', messages: [], avatar
   });
+  // 为新角色启动绘画定时器
+  _scheduleOneCharPaintTimer(id);
   renderChatList();
   renderContacts();
   renderMobileChatList();
@@ -4751,6 +4827,8 @@ let _pendingDeleteId = null;
 
 function _doDeleteContact(id) {
   appData.chats = appData.chats.filter(c => c.id !== id);
+  // 清理该角色的绘画定时器
+  if (_charPaintTimers[id]) { clearTimeout(_charPaintTimers[id]); delete _charPaintTimers[id]; }
   if (currentChatId === id) {
     currentChatId = appData.chats.length > 0 ? appData.chats[0].id : null;
     if (currentChatId) selectChat(currentChatId);
@@ -4829,7 +4907,7 @@ function renderMoments() {
     const authorName = isMe ? escHtml(p.nickname) : escHtml(chat?.name || '未知');
 
     // 已看头像列表
-    const seenHtml = (m.seenBy && m.seenBy.length > 0) ? `
+    const seenInner = (m.seenBy && m.seenBy.length > 0) ? `
       <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;">
         <span style="font-size:10px;color:var(--text-hint);">已看：</span>
         ${m.seenBy.slice(0,5).map(cid => {
@@ -4838,6 +4916,7 @@ function renderMoments() {
         }).join('')}
         ${m.seenBy.length > 5 ? `<span style="font-size:10px;color:var(--text-hint);">+${m.seenBy.length-5}</span>` : ''}
       </div>` : '';
+    const seenHtml = `<div class="moment-seen-area">${seenInner}</div>`;
 
     // 图片网格
     const imgsHtml = (m.images && m.images.length > 0) ? `
@@ -5175,17 +5254,93 @@ function postMomentFull() {
   if (preview) preview.innerHTML = '';
   showToast('动态已发布 🌸');
 
-  // 随机角色标记已看（30s内）
-  setTimeout(() => {
-    appData.chats.forEach(c => {
-      if (Math.random() < 0.6) {
-        if (!newM.seenBy) newM.seenBy = [];
-        if (!newM.seenBy.includes(c.id)) newM.seenBy.push(c.id);
+  // 每个角色单独随机延迟看见动态（10s ~ 5min 内）
+  appData.chats.forEach(c => {
+    const seeDelay = 10000 + Math.random() * 290000; // 10s ~ 5min
+    setTimeout(() => {
+      // 标记已看
+      if (!newM.seenBy) newM.seenBy = [];
+      if (!newM.seenBy.includes(c.id)) newM.seenBy.push(c.id);
+      saveData();
+      // 局部更新已看列表（无需全量重渲染）
+      const ti = document.querySelector(`.moment-item[data-moment-id="${newM.id}"]`);
+      if (ti) {
+        const seenArea = ti.querySelector('.moment-seen-area');
+        if (seenArea) {
+          const seenBy = newM.seenBy || [];
+          seenArea.innerHTML = seenBy.length > 0 ? `
+            <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;">
+              <span style="font-size:10px;color:var(--text-hint);">已看：</span>
+              ${seenBy.slice(0,5).map(cid => {
+                const sc = appData.chats.find(x => x.id === cid);
+                return sc ? `<div style="width:18px;height:18px;border-radius:50%;background:${avatarGradient(sc)};color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;">${sc.emoji || sc.name.charAt(0)}</div>` : '';
+              }).join('')}
+              ${seenBy.length > 5 ? `<span style="font-size:10px;color:var(--text-hint);">+${seenBy.length-5}</span>` : ''}
+            </div>` : '';
+        }
       }
-    });
-    saveData();
-    renderMoments();
-  }, 5000 + Math.random() * 25000);
+
+      // 75% 概率点赞（25% 不点赞）
+      if (Math.random() >= 0.25) {
+        // 点赞延迟：看见后再等 3s~30s
+        const likeDelay = 3000 + Math.random() * 27000;
+        setTimeout(() => {
+          // 防止重复点赞
+          if (!newM.likedBy) newM.likedBy = [];
+          if (newM.likedBy.includes(c.id)) return;
+          newM.likedBy.push(c.id);
+          newM.likes = (newM.likes || 0) + 1;
+          saveData();
+          // 通知
+          appData.momentNotifications.push({ id: Date.now(), type: 'like', momentId: newM.id, chatId: c.id, text: `${c.name} 赞了你的动态`, time: getTime(), read: false });
+          updateMomentBadge();
+          // 局部更新点赞数
+          const ti2 = document.querySelector(`.moment-item[data-moment-id="${newM.id}"]`);
+          if (ti2) {
+            const likeBtn = ti2.querySelector(`.moment-action[data-action="like"]`);
+            if (likeBtn) likeBtn.innerHTML = `<i class="fa-${newM.liked ? 'solid' : 'regular'} fa-heart"></i> ${newM.likes}`;
+          }
+
+          // 点赞后 75% 概率评论（25% 不评论）
+          if (Math.random() >= 0.25) {
+            // 从朋友圈文本中随机选 1~3 条拼成评论
+            const momentTexts = appData.moments
+              .filter(x => x.text && x.text.trim() && x.id !== newM.id)
+              .map(x => x.text.trim());
+            // 若朋友圈文本不足，fallback 到 wordCards
+            const pool = momentTexts.length > 0 ? momentTexts
+              : appData.wordCards.filter((_, i) => !appData.blockedWords.includes(i));
+            if (pool.length > 0) {
+              const pickCount = Math.min(pool.length, 1 + Math.floor(Math.random() * 3)); // 1~3
+              const shuffled = [...pool].sort(() => Math.random() - 0.5);
+              const resp = shuffled.slice(0, pickCount).join('');
+              // 评论延迟：点赞后再等 5s~40s
+              const cmtDelay = 5000 + Math.random() * 35000;
+              setTimeout(() => {
+                if (!newM.comments) newM.comments = [];
+                newM.comments.push({ from: 'other', chatId: c.id, text: resp });
+                appData.momentNotifications.push({ id: Date.now(), type: 'comment', momentId: newM.id, chatId: c.id, text: resp, time: getTime(), read: false });
+                saveData();
+                updateMomentBadge();
+                // 局部追加评论
+                const ti3 = document.querySelector(`.moment-item[data-moment-id="${newM.id}"]`);
+                if (ti3) {
+                  let mc = ti3.querySelector(`#mc-${newM.id}`);
+                  if (!mc) { mc = document.createElement('div'); mc.id='mc-'+newM.id; mc.className='moment-comments'; ti3.appendChild(mc); }
+                  const d = document.createElement('div');
+                  d.className = 'moment-comment';
+                  d.innerHTML = `<strong>${escHtml(c.name)}</strong>：${escHtml(resp)}`;
+                  mc.appendChild(d);
+                  const cmtBtn = ti3.querySelector(`.moment-action[data-action="comment"]`);
+                  if (cmtBtn) cmtBtn.innerHTML = `<i class="fa-regular fa-comment"></i> ${newM.comments.length}`;
+                }
+              }, cmtDelay);
+            }
+          }
+        }, likeDelay);
+      }
+    }, seeDelay);
+  });
 }
 
 /** 兼容旧调用 postMoment() */
@@ -6151,6 +6306,23 @@ function openModal(id) {
   const box = document.getElementById('modal-' + id);
   if (box) box.style.display = 'block';
   currentModal = id;
+  // 初始化「我的资料」弹窗
+  if (id === 'profile') {
+    const p = appData.userProfile || {};
+    const nameEl = document.getElementById('profileName');
+    const signEl = document.getElementById('profileSign');
+    if (nameEl) nameEl.value = p.nickname || '用户';
+    if (signEl) signEl.value = p.signature || '';
+    window._profileAvatarData = '';
+    const prev = document.getElementById('profileAvPreview');
+    if (prev) {
+      if (p.avatar) {
+        prev.innerHTML = `<img src="${p.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+      } else {
+        prev.innerHTML = `<span id="profileAvLetter">${(p.nickname || '我').charAt(0)}</span>`;
+      }
+    }
+  }
   // 重置添加联系人头像状态
   if (id === 'addContact') {
     window._newContactAvatarData = '';
@@ -6191,11 +6363,27 @@ function toggleSetting(key) {
   saveData();
 }
 
+function previewProfileAvatar(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    window._profileAvatarData = e.target.result;
+    const prev = document.getElementById('profileAvPreview');
+    if (prev) prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+  };
+  reader.readAsDataURL(file);
+}
+
 function saveProfile() {
   const name = document.getElementById('profileName').value.trim();
   const sign = document.getElementById('profileSign').value.trim();
   appData.userProfile.nickname  = name || '用户';
   appData.userProfile.signature = sign;
+  if (window._profileAvatarData) {
+    appData.userProfile.avatar = window._profileAvatarData;
+    window._profileAvatarData = '';
+  }
   syncProfileUI();
   saveData();
   closeModal();
@@ -6336,18 +6524,64 @@ function importData(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const imported = JSON.parse(e.target.result);
+
+      // 统计本次导入了哪些字段
+      const labelMap = {
+        chats: '聊天记录 & 角色', wordCards: '词卡库', wordCardGroups: '词卡分组',
+        blockedWords: '屏蔽词', statusCards: '在线状态库', statusCardGroups: '状态分组',
+        myEmojiPacks: '我的表情包', hisEmojiPacks: '对方表情包',
+        moments: '朋友圈', momentNotifications: '朋友圈通知', mutedMoments: '屏蔽动态',
+        mailbox: '双人信箱', patMessages: '拍一拍文案', signatures: '签名库',
+        userProfile: '个人资料', userAvatar: '我的头像', settings: '设置',
+        disabledPatIndices: '拍一拍设置', listenSong: '听歌', decideQuestions: '今日决定',
+        chatSignatures: '签名分配', wordCardGroupsCustom: '自定义词卡分组'
+      };
+      const importedKeys = Object.keys(imported).filter(k => k !== '_type' && k !== '_keys' && k !== 'version');
+      const importedLabels = importedKeys.map(k => labelMap[k] || k);
+
       appData = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), imported);
-      saveData();
+
+      // ★ 关键修复：等待 IndexedDB 写入完成后再 reload，避免竞态丢数据
+      showToast(`✅ 正在写入数据，请稍候…`);
+      try {
+        await _idbSet(DATA_KEY, appData);
+        // 同步写精简版到 localStorage
+        try {
+          const slim = _slimData(appData);
+          localStorage.setItem(DATA_KEY, JSON.stringify(slim));
+        } catch (_) {
+          try { localStorage.removeItem(DATA_KEY); } catch (__) {}
+        }
+      } catch (idbErr) {
+        console.warn('[MultiChat] IDB write error during import:', idbErr);
+        // IDB 写失败，回退只写 localStorage
+        try {
+          const slim = _slimData(appData);
+          localStorage.setItem(DATA_KEY, JSON.stringify(slim));
+        } catch (_) {}
+      }
+
+      // 写入完成，提示后跳转
+      const summary = importedLabels.length > 0
+        ? `✅ 全量导入成功！\n已还原：${importedLabels.join('、')}`
+        : '✅ 全量导入成功！';
+      alert(summary);
       location.reload();
-    } catch { showToast('导入失败：文件格式错误'); }
+
+    } catch (err) {
+      console.error('[MultiChat] importData error:', err);
+      showToast('❌ 导入失败：文件格式错误，请确认选择的是正确的备份 JSON');
+    }
   };
   reader.readAsText(file);
   input.value = '';
 }
 function clearData() {
+  if (!confirm('确认清除全部本地数据？此操作不可恢复。')) return;
+  _idbSet(DATA_KEY, null).catch(() => {});
   localStorage.removeItem(DATA_KEY);
   location.reload();
 }
@@ -6393,13 +6627,13 @@ function shadeColor(color, percent) {
 /* ════════════════════════════════════════════════════════════
    P5 · 绘画板 (Paint Modal)
    ════════════════════════════════════════════════════════════ */
-let paintTool = 'shape'; // shape | line | letter | eraser
+let paintTool = 'line'; // shape | line | letter | eraser
 let paintColor = '#e8a0b0';
 let paintSize  = 12;
 let paintDrawing = false;
 let paintLastX = 0, paintLastY = 0;
 const PAINT_COLORS = ['#e8a0b0','#c97088','#6fa3ef','#3a74c8','#a78bfa','#7c4dff','#6eca8f','#3a8a5e','#fb923c','#e55c00','#f43f5e','#c0002a','#fbbf24','#c8960a','#34d399','#0a8a60','#60a5fa','#1a5fd8','#f472b6','#b8004a','#1a1a1a','#888888','#ffffff'];
-const PAINT_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZあいうえおかきくけこ';
+const PAINT_LETTER_SET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 function openPaintModal() {
   const overlay = document.getElementById('paintOverlay');
@@ -6407,6 +6641,7 @@ function openPaintModal() {
   overlay.style.display = 'flex';
   initPaintCanvas();
   initPaintColorSwatches();
+  initPaintLetterGrid();
 }
 
 function closePaintModal() {
@@ -6424,6 +6659,21 @@ function initPaintColorSwatches() {
     d.onclick = () => setPaintColor(c, d);
     container.appendChild(d);
   });
+}
+
+function initPaintLetterGrid() {
+  const grid = document.getElementById('paintLetterGrid');
+  if (!grid || grid.childElementCount > 0) return;
+  for (const ch of PAINT_LETTER_SET) {
+    const btn = document.createElement('button');
+    btn.textContent = ch;
+    btn.title = ch;
+    btn.style.cssText = 'width:28px;height:28px;border-radius:5px;border:0.5px solid var(--border);background:var(--surface);font-size:13px;font-weight:600;cursor:pointer;color:var(--text-main);transition:all .12s;flex-shrink:0;';
+    btn.onmouseenter = () => { btn.style.background='var(--primary-light)'; btn.style.color='var(--primary-deep)'; };
+    btn.onmouseleave = () => { btn.style.background='var(--surface)'; btn.style.color='var(--text-main)'; };
+    btn.onclick = () => placeLetter(ch);
+    grid.appendChild(btn);
+  }
 }
 
 function setPaintColorFromPicker(color) {
@@ -6455,7 +6705,15 @@ function setPaintTool(tool, el) {
     el.style.borderColor = 'var(--primary)';
   }
   const canvas = document.getElementById('paintCanvas');
-  canvas.style.cursor = tool === 'eraser' ? 'cell' : (tool === 'letter' ? 'text' : 'crosshair');
+  canvas.style.cursor = tool === 'eraser' ? 'cell' : (tool === 'letter' ? 'default' : (tool === 'shape' ? 'default' : 'crosshair'));
+  // 显示/隐藏子面板
+  document.getElementById('paintShapePanel').style.display  = tool === 'shape'  ? 'block' : 'none';
+  document.getElementById('paintLetterPanel').style.display = tool === 'letter' ? 'block' : 'none';
+  // 大小滑块只对 line/eraser 有意义
+  const showSize = tool === 'line' || tool === 'eraser';
+  document.getElementById('paintSizeLabel').style.display  = showSize ? '' : 'none';
+  document.getElementById('paintSizeSlider').style.display = showSize ? '' : 'none';
+  document.getElementById('paintSizeVal').style.display    = showSize ? '' : 'none';
 }
 
 function setPaintColor(color, el) {
@@ -6472,7 +6730,93 @@ function setPaintSize(val) {
   document.getElementById('paintSizeVal').textContent = val + 'px';
 }
 
-// Canvas 绘制事件
+/** 形状工具：点击形状按钮，随机大小放置到画布随机位置 */
+function placeShape(shapeType) {
+  const canvas = document.getElementById('paintCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  // 随机大小 20~80px
+  const size = 20 + Math.random() * 60;
+  // 随机位置（留边距）
+  const margin = size * 0.7;
+  const x = margin + Math.random() * (W - margin * 2);
+  const y = margin + Math.random() * (H - margin * 2);
+  const filled = Math.random() < 0.55;
+
+  ctx.globalAlpha = 0.88;
+  ctx.strokeStyle = paintColor;
+  ctx.fillStyle   = paintColor;
+  ctx.lineWidth   = 2 + size / 20;
+  ctx.beginPath();
+
+  if (shapeType === 'circle') {
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+  } else if (shapeType === 'triangle') {
+    ctx.moveTo(x, y - size / 2);
+    ctx.lineTo(x + size / 2, y + size / 2);
+    ctx.lineTo(x - size / 2, y + size / 2);
+    ctx.closePath();
+  } else if (shapeType === 'rect') {
+    ctx.rect(x - size / 2, y - size * 0.35, size, size * 0.7);
+  } else if (shapeType === 'star5') {
+    _drawStar(ctx, x, y, 5, size / 2, size / 4);
+  } else if (shapeType === 'diamond') {
+    const h = size * 0.65;
+    ctx.moveTo(x, y - h);
+    ctx.lineTo(x + size / 2, y);
+    ctx.lineTo(x, y + h);
+    ctx.lineTo(x - size / 2, y);
+    ctx.closePath();
+  } else if (shapeType === 'hexagon') {
+    const r = size / 2;
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      i === 0 ? ctx.moveTo(x + r * Math.cos(angle), y + r * Math.sin(angle))
+              : ctx.lineTo(x + r * Math.cos(angle), y + r * Math.sin(angle));
+    }
+    ctx.closePath();
+  } else if (shapeType === 'heart') {
+    _drawHeart(ctx, x, y, size * 0.45);
+  }
+
+  filled ? ctx.fill() : ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function _drawHeart(ctx, cx, cy, r) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(r / 10, r / 10);
+  ctx.moveTo(0, 3);
+  ctx.bezierCurveTo(-10, -4, -14, 2, -7, 8);
+  ctx.bezierCurveTo(-4, 11, 0, 13, 0, 13);
+  ctx.bezierCurveTo(0, 13, 4, 11, 7, 8);
+  ctx.bezierCurveTo(14, 2, 10, -4, 0, 3);
+  ctx.restore();
+}
+
+/** 字母工具：点击字母按钮，固定大小(36px)放置到画布随机位置 */
+function placeLetter(ch) {
+  const canvas = document.getElementById('paintCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const fontSize = 36;
+  // 随机位置（留边距）
+  const x = fontSize + Math.random() * (W - fontSize * 2);
+  const y = fontSize + Math.random() * (H - fontSize * 1.2);
+
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = paintColor;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ch, x, y);
+  ctx.textBaseline = 'alphabetic';
+  ctx.globalAlpha = 1;
+}
+
+// Canvas 绘制事件（仅 line / eraser 用到鼠标拖拽）
 function getPaintPos(canvas, e) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width  / rect.width;
@@ -6487,24 +6831,11 @@ function getPaintPos(canvas, e) {
 
 function paintPointerDown(e) {
   e.preventDefault();
+  if (paintTool === 'shape' || paintTool === 'letter') return; // handled by buttons
   paintDrawing = true;
   const canvas = document.getElementById('paintCanvas');
   const {x, y} = getPaintPos(canvas, e);
   paintLastX = x; paintLastY = y;
-
-  if (paintTool === 'letter') {
-    // 字母工具：弹出字母选择器
-    const letter = prompt('输入一个字符（如 A, B, あ, ❤）:');
-    if (letter) {
-      const ctx = canvas.getContext('2d');
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = paintColor;
-      ctx.font = `bold ${Math.max(paintSize * 2, 20)}px sans-serif`;
-      ctx.fillText(letter.charAt(0), x, y);
-    }
-    paintDrawing = false;
-    return;
-  }
 
   if (paintTool === 'eraser') {
     const ctx = canvas.getContext('2d');
@@ -6512,10 +6843,7 @@ function paintPointerDown(e) {
     ctx.arc(x, y, paintSize, 0, Math.PI * 2);
     ctx.fillStyle = '#fffaf8';
     ctx.fill();
-    return;
   }
-
-  // shape 和 line：在 mouseup 时绘制
 }
 
 function paintPointerMove(e) {
@@ -6531,7 +6859,6 @@ function paintPointerMove(e) {
     ctx.fillStyle = '#fffaf8';
     ctx.fill();
   } else if (paintTool === 'line') {
-    // 线条工具：自由绘制
     const ctx = canvas.getContext('2d');
     ctx.beginPath();
     ctx.strokeStyle = paintColor;
@@ -6549,37 +6876,6 @@ function paintPointerMove(e) {
 function paintPointerUp(e) {
   if (!paintDrawing) return;
   paintDrawing = false;
-  const canvas = document.getElementById('paintCanvas');
-  const {x, y} = getPaintPos(canvas, e);
-  const ctx = canvas.getContext('2d');
-
-  if (paintTool === 'shape') {
-    const size = paintSize * 2 + 10;
-    ctx.globalAlpha = 0.85;
-    ctx.strokeStyle = paintColor;
-    ctx.fillStyle   = paintColor;
-    ctx.lineWidth   = Math.max(1, paintSize / 3);
-    ctx.beginPath();
-    const shapeRnd = Math.random();
-    if (shapeRnd < 0.35) {
-      // 圆
-      ctx.arc(paintLastX, paintLastY, size/2, 0, Math.PI*2);
-    } else if (shapeRnd < 0.65) {
-      // 矩形
-      ctx.rect(paintLastX - size/2, paintLastY - size/2, size, size);
-    } else if (shapeRnd < 0.85) {
-      // 三角
-      ctx.moveTo(paintLastX, paintLastY - size/2);
-      ctx.lineTo(paintLastX + size/2, paintLastY + size/2);
-      ctx.lineTo(paintLastX - size/2, paintLastY + size/2);
-      ctx.closePath();
-    } else {
-      // 星形
-      _drawStar(ctx, paintLastX, paintLastY, 5, size/2, size/4);
-    }
-    Math.random() < 0.5 ? ctx.fill() : ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
 }
 
 function _drawStar(ctx, cx, cy, spikes, outerR, innerR) {
@@ -7786,6 +8082,191 @@ function selectAllBackupItems(val) {
   document.querySelectorAll('.bk-chk').forEach(c => c.checked = val);
 }
 
+/** 触发分项导入文件选择 */
+function triggerPartialImport() {
+  document.getElementById('partialImportInput').click();
+}
+
+/**
+ * 分项导入：读取 JSON 文件，将其中的字段合并到 appData（不覆盖现有数据，追加/合并）
+ * 支持全量备份 JSON 和分项备份 JSON 两种格式
+ */
+async function importPartial(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const labelMap = {
+    chats: '聊天记录 & 角色', wordCards: '词卡库', wordCardGroups: '词卡分组',
+    blockedWords: '屏蔽词', statusCards: '在线状态库', statusCardGroups: '状态分组',
+    myEmojiPacks: '我的表情包', hisEmojiPacks: '对方表情包',
+    moments: '朋友圈', mailbox: '双人信箱', patMessages: '拍一拍文案',
+    signatures: '签名库', settings: '设置', userProfile: '个人资料',
+    userAvatar: '我的头像', disabledPatIndices: '拍一拍设置',
+    momentNotifications: '朋友圈通知', mutedMoments: '屏蔽动态',
+    listenSong: '听歌', decideQuestions: '今日决定',
+    chatSignatures: '签名分配'
+  };
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const imported = JSON.parse(e.target.result);
+
+      // 判断是分项备份还是全量备份，确定要导入哪些字段
+      let keysToImport = [];
+      if (imported._type === 'partial' && Array.isArray(imported._keys)) {
+        // 分项备份文件
+        keysToImport = imported._keys.filter(k => imported[k] !== undefined);
+      } else {
+        // 全量备份文件：取所有数据字段（排除内部字段）
+        keysToImport = Object.keys(imported).filter(k => !['_type','_keys','version'].includes(k));
+      }
+
+      if (keysToImport.length === 0) {
+        showToast('❌ 未检测到可导入的数据字段');
+        input.value = '';
+        return;
+      }
+
+      // 逐字段合并（追加，不覆盖）
+      const succeededKeys = [];
+      const failedKeys = [];
+
+      for (const key of keysToImport) {
+        try {
+          const src = imported[key];
+          if (src === undefined || src === null) continue;
+
+          if (key === 'chats' && Array.isArray(src)) {
+            // 聊天：按 id 去重追加
+            const existingIds = new Set(appData.chats.map(c => c.id));
+            const toAdd = src.filter(c => !existingIds.has(c.id));
+            appData.chats = [...appData.chats, ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 个角色）`);
+          } else if (key === 'wordCards' && Array.isArray(src)) {
+            // 词卡：去重追加
+            const existing = new Set(appData.wordCards);
+            const toAdd = src.filter(w => !existing.has(w));
+            appData.wordCards = [...appData.wordCards, ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'statusCards' && Array.isArray(src)) {
+            // 状态库：去重追加
+            const existing = new Set(appData.statusCards);
+            const toAdd = src.filter(s => !existing.has(s));
+            appData.statusCards = [...appData.statusCards, ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'statusCardGroups' && typeof src === 'object') {
+            // 状态分组：合并，新分组追加，已有分组内条目去重合并
+            if (!appData.statusCardGroups) appData.statusCardGroups = {};
+            let addedGroups = 0;
+            for (const [gk, gv] of Object.entries(src)) {
+              if (!appData.statusCardGroups[gk]) {
+                appData.statusCardGroups[gk] = gv;
+                addedGroups++;
+              } else if (gv && gv.items && Array.isArray(gv.items)) {
+                const existSet = new Set(appData.statusCardGroups[gk].items || []);
+                const toAdd2 = gv.items.filter(i => !existSet.has(i));
+                appData.statusCardGroups[gk].items = [...(appData.statusCardGroups[gk].items || []), ...toAdd2];
+              }
+            }
+            succeededKeys.push(`${labelMap[key] || key}（处理 ${Object.keys(src).length} 个分组）`);
+          } else if (key === 'wordCardGroups' && typeof src === 'object') {
+            if (!appData.wordCardGroups) appData.wordCardGroups = {};
+            Object.assign(appData.wordCardGroups, src);
+            succeededKeys.push(labelMap[key] || key);
+          } else if (key === 'signatures' && Array.isArray(src)) {
+            const existingTexts = new Set((appData.signatures || []).map(s => s.text || s));
+            const toAdd = src.filter(s => !existingTexts.has(s.text || s));
+            appData.signatures = [...(appData.signatures || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'moments' && Array.isArray(src)) {
+            const existingIds = new Set((appData.moments || []).map(m => m.id));
+            const toAdd = src.filter(m => !existingIds.has(m.id));
+            appData.moments = [...(appData.moments || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'mailbox' && typeof src === 'object') {
+            if (!appData.mailbox) appData.mailbox = { received: [], sent: [] };
+            const existRIds = new Set((appData.mailbox.received || []).map(m => m.id));
+            const existSIds = new Set((appData.mailbox.sent || []).map(m => m.id));
+            const addR = (src.received || []).filter(m => !existRIds.has(m.id));
+            const addS = (src.sent || []).filter(m => !existSIds.has(m.id));
+            appData.mailbox.received = [...(appData.mailbox.received || []), ...addR];
+            appData.mailbox.sent = [...(appData.mailbox.sent || []), ...addS];
+            succeededKeys.push(`${labelMap[key] || key}（收件 +${addR.length}，发件 +${addS.length}）`);
+          } else if (key === 'patMessages' && Array.isArray(src)) {
+            const existing = new Set(appData.patMessages || []);
+            const toAdd = src.filter(p => !existing.has(p));
+            appData.patMessages = [...(appData.patMessages || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'myEmojiPacks' || key === 'hisEmojiPacks') {
+            // 表情包：追加（base64，无法简单去重，全量追加）
+            if (!Array.isArray(appData[key])) appData[key] = [];
+            appData[key] = [...appData[key], ...(Array.isArray(src) ? src : [])];
+            succeededKeys.push(`${labelMap[key] || key}（追加 ${Array.isArray(src) ? src.length : 0} 张）`);
+          } else if (key === 'blockedWords' && Array.isArray(src)) {
+            const existing = new Set(appData.blockedWords || []);
+            const toAdd = src.filter(w => !existing.has(w));
+            appData.blockedWords = [...(appData.blockedWords || []), ...toAdd];
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 条）`);
+          } else if (key === 'settings' && typeof src === 'object') {
+            // 设置：深合并（备份值覆盖现有）
+            appData.settings = deepMerge(appData.settings || {}, src);
+            succeededKeys.push(labelMap[key] || key);
+          } else if (key === 'userProfile' && typeof src === 'object') {
+            appData.userProfile = Object.assign({}, appData.userProfile || {}, src);
+            succeededKeys.push(labelMap[key] || key);
+          } else {
+            // 其他字段：直接覆盖
+            appData[key] = src;
+            succeededKeys.push(labelMap[key] || key);
+          }
+        } catch (fieldErr) {
+          console.warn(`[MultiChat] importPartial field "${key}" error:`, fieldErr);
+          failedKeys.push(labelMap[key] || key);
+        }
+      }
+
+      if (succeededKeys.length === 0) {
+        showToast('❌ 导入失败：没有字段成功写入');
+        input.value = '';
+        return;
+      }
+
+      // 等待 IDB 写入完成（避免竞态）
+      showToast('⏳ 正在写入数据…');
+      try {
+        await _idbSet(DATA_KEY, appData);
+        try {
+          const slim = _slimData(appData);
+          localStorage.setItem(DATA_KEY, JSON.stringify(slim));
+        } catch (_) {
+          try { localStorage.removeItem(DATA_KEY); } catch (__) {}
+        }
+      } catch (idbErr) {
+        console.warn('[MultiChat] IDB write error in importPartial:', idbErr);
+        try {
+          const slim = _slimData(appData);
+          localStorage.setItem(DATA_KEY, JSON.stringify(slim));
+        } catch (_) {}
+      }
+
+      // 构建结果提示
+      let msg = `✅ 分项导入成功！\n\n已导入（${succeededKeys.length} 项）：\n${succeededKeys.map(k => '  · ' + k).join('\n')}`;
+      if (failedKeys.length > 0) {
+        msg += `\n\n⚠️ 导入失败（${failedKeys.length} 项）：\n${failedKeys.map(k => '  · ' + k).join('\n')}`;
+      }
+      alert(msg);
+      location.reload();
+
+    } catch (err) {
+      console.error('[MultiChat] importPartial error:', err);
+      showToast('❌ 导入失败：文件格式错误，请确认选择的是正确的备份 JSON');
+    }
+    input.value = '';
+  };
+  reader.readAsText(file);
+}
+
 /* ════════════════════════════════════════════════════════════
    P10 · 整合 — 统一定时器初始化 & visibilitychange
    ════════════════════════════════════════════════════════════ */
@@ -7802,6 +8283,7 @@ function initAllTimers() {
   scheduleMusicBubble();     // P8: 听歌气泡
   scheduleSignature();       // P9: 签名轮换
   scheduleStatusRefresh();   // P1: 状态刷新
+  scheduleCharPaintTimers(); // P3: 每10分钟1%概率发送绘画
 }
 
 let _statusRefreshTimer = null;
@@ -7874,6 +8356,7 @@ window.addEventListener('beforeunload', () => {
     .forEach(t => { if (t) clearTimeout(t); });
   // 清除每个角色的独立定时器
   Object.keys(_charAutoTimers).forEach(cid => clearTimeout(_charAutoTimers[cid]));
+  Object.keys(_charPaintTimers).forEach(cid => clearTimeout(_charPaintTimers[cid]));
   clearInterval(callInterval);
   clearInterval(progressTimer);
 });
