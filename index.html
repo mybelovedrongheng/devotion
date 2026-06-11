@@ -2234,6 +2234,11 @@ body {
           <div class="toggle" id="notificationToggle" onclick="toggleSetting('notification')"></div>
         </div>
         <div class="settings-item">
+          <div class="settings-icon" style="background:var(--primary-light);color:var(--primary-deep);"><i class="fa-solid fa-bell-concierge"></i></div>
+          <div><div class="settings-label">系统推送通知</div><div class="settings-desc" id="pushNotifDesc">关闭网页后仍可收到角色消息提醒</div></div>
+          <div class="toggle" id="pushNotificationToggle" onclick="togglePushNotification()"></div>
+        </div>
+        <div class="settings-item">
           <div class="settings-icon" style="background:var(--primary-light);color:var(--primary-deep);"><i class="fa-solid fa-face-smile-beam"></i></div>
           <div><div class="settings-label">Emoji 混合模式</div><div class="settings-desc">Emoji 附在文字内，而不单独发送</div></div>
           <div class="toggle" id="emojiMixModeToggle" onclick="toggleSetting('emojiMixMode')"></div>
@@ -2717,14 +2722,14 @@ body {
       <div class="detail-header">
         <span class="char-name">表情包管理</span>
       </div>
-      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;">
         <div class="panel-tabs" style="padding:0 12px;flex-shrink:0;" id="emojiViewTabs">
           <div class="panel-tab active" onclick="switchEmojiTab('my',this)">我的表情包</div>
           <div class="panel-tab" onclick="switchEmojiTab('his',this)">对方表情包</div>
           <div class="panel-tab" onclick="switchEmojiTab('emojilib',this)">Emoji 库</div>
         </div>
         <!-- 我的表情包 -->
-        <div id="emojiTabMy" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+        <div id="emojiTabMy" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;">
           <div style="padding:10px 14px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;">
             <span style="font-size:12px;color:var(--text-sub);">我发送的自定义图片表情包</span>
             <button class="btn primary" style="margin-left:auto;padding:5px 12px;font-size:11px;" onclick="document.getElementById('myEmojiUpload').click()">
@@ -2732,10 +2737,10 @@ body {
             </button>
             <input type="file" id="myEmojiUpload" accept="image/*" multiple style="display:none" onchange="addMyEmoji(this)">
           </div>
-          <div id="myEmojiGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px;overflow-y:auto;flex:1;"></div>
+          <div id="myEmojiGrid" style="display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:max-content;align-content:start;gap:10px;padding:12px;overflow-y:auto;flex:1;min-height:0;"></div>
         </div>
         <!-- 对方表情包 -->
-        <div id="emojiTabHis" style="flex:1;display:flex;flex-direction:column;overflow:hidden;display:none;">
+        <div id="emojiTabHis" style="flex:1;display:flex;flex-direction:column;overflow:hidden;display:none;min-height:0;">
           <div style="padding:10px 14px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;">
             <span style="font-size:12px;color:var(--text-sub);">角色随机发出的表情包（20% 概率）</span>
             <button class="btn primary" style="margin-left:auto;padding:5px 12px;font-size:11px;" onclick="document.getElementById('hisEmojiUpload').click()">
@@ -2743,7 +2748,7 @@ body {
             </button>
             <input type="file" id="hisEmojiUpload" accept="image/*" multiple style="display:none" onchange="addHisEmoji(this)">
           </div>
-          <div id="hisEmojiGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px;overflow-y:auto;flex:1;"></div>
+          <div id="hisEmojiGrid" style="display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:max-content;align-content:start;gap:10px;padding:12px;overflow-y:auto;flex:1;min-height:0;"></div>
         </div>
         <!-- Emoji 字符库（角色绘画时随机插入） -->
         <div id="emojiTabLib" style="display:none;flex-direction:column;overflow:hidden;flex:1;">
@@ -3435,6 +3440,7 @@ const DEFAULT_DATA = {
     cardsRange: { min: 1, max: 3 },
     repliesRange: { min: 1, max: 1 },
     notification: true,
+    pushNotification: false,
     autoMessage: false,
     autoMessageMin: 0, autoMessageMax: 480,
     decideThinkTime: 2, decideReasonMin: 1, decideReasonMax: 2,
@@ -3533,11 +3539,51 @@ async function loadDataAsync() {
     // 则优先保留 IDB 里的用户数据，避免用默认值覆盖用户数据。
     const USER_ARRAY_KEYS = ['statusCards','statusCardGroups','myEmojiPacks','hisEmojiPacks','emojiLib','blockedWords','patMessages','disabledPatIndices','moments'];
     const memIsDefault = (key) => JSON.stringify(appData[key]) === JSON.stringify(DEFAULT_DATA[key]);
+    // ★ 表情包修复：_slimData 会将 myEmojiPacks/hisEmojiPacks 里的 base64 全部替换为 ''
+    // localStorage 恢复后，内存里是 ['','',''] 之类的空字符串数组，不等于默认值 []，
+    // 导致 memIsDefault 返回 false，IDB 里的完整图片数据被空字符串数组覆盖。
+    // 修复：对图片类数组额外检测"全部为空字符串"的情况，同样视为需要从 IDB 恢复。
+    const EMOJI_PACK_KEYS = ['myEmojiPacks', 'hisEmojiPacks'];
+    const memIsSlimmed = (key) => {
+      const arr = appData[key];
+      return Array.isArray(arr) && arr.length > 0 && arr.every(v => v === '' || v === null || v === undefined);
+    };
     for (const k of USER_ARRAY_KEYS) {
-      if (memIsDefault(k) && idbBase[k] !== undefined) {
-        // 内存里的值等于默认值，说明本次启动没有加载到持久化数据，用 IDB 值替代
+      if ((memIsDefault(k) || (EMOJI_PACK_KEYS.includes(k) && memIsSlimmed(k))) && idbBase[k] !== undefined) {
+        // 内存里的值等于默认值，或是被 _slimData 清空的表情包占位数组，用 IDB 完整值替代
         appData[k] = idbBase[k];
       }
+    }
+    // ★★★ 头像修复：localStorage 精简版（_slimData）会将 chats[].avatar 清空为 ''，
+    // 导致 deepMerge(idbBase, appData) 时内存中的空字符串覆盖 IDB 中保存的完整 base64 头像。
+    // 修复：在合并前，将 IDB 中完整的 avatar / callBg 回填到内存 appData.chats，
+    // 同理恢复消息中的图片、用户头像，确保合并后不会丢失大图数据。
+    if (idbBase.chats && appData.chats) {
+      const idbChatMap = new Map(idbBase.chats.map(c => [c.id, c]));
+      appData.chats = appData.chats.map(c => {
+        const idbChat = idbChatMap.get(c.id);
+        if (!idbChat) return c;
+        const merged = { ...c };
+        // 仅当内存里字段为空（被 _slimData 剥离）且 IDB 里有值时才回填
+        if (!merged.avatar && idbChat.avatar) merged.avatar = idbChat.avatar;
+        if (!merged.callBg && idbChat.callBg) merged.callBg = idbChat.callBg;
+        // 恢复消息中被剥离的图片
+        if (merged.messages && idbChat.messages && merged.messages.length === idbChat.messages.length) {
+          merged.messages = merged.messages.map((msg, i) => {
+            const idbMsg = idbChat.messages[i];
+            if (msg.type === 'image' && !msg.src && idbMsg && idbMsg.src) {
+              return { ...msg, src: idbMsg.src };
+            }
+            return msg;
+          });
+        }
+        return merged;
+      });
+    }
+    // 恢复用户头像（userProfile.avatar 由 _slimData 保留，但以防万一也检查一下）
+    if (!appData.userProfile?.avatar && idbBase.userProfile?.avatar) {
+      if (!appData.userProfile) appData.userProfile = {};
+      appData.userProfile.avatar = idbBase.userProfile.avatar;
     }
     appData = deepMerge(idbBase, appData);
     _idbReady = true; // IDB 完整数据已加载，后续 saveData 可安全写入
@@ -3788,6 +3834,11 @@ function switchView(name, navEl) {
   if (name === 'statusLib') {
     renderStatusList();
   }
+
+  // 切换到设置视图时，更新推送通知 UI 状态
+  if (name === 'settings') {
+    setTimeout(updatePushNotifUI, 50);
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -3857,7 +3908,7 @@ function selectChat(id) {
   const chat = getChatById(id);
   if (chat) {
     chat.unread = 0;
-    chat._statusText = null; // 每次打开聊天重新随机状态
+    // 不再强制清除 _statusText，状态由 getChatStatus 按到期时间管理
   }
   renderChatList();
   renderMobileChatList();
@@ -3881,11 +3932,11 @@ function updateChatHeader(id) {
     avEl.innerHTML = chat.avatar ? `<img src="${chat.avatar}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : escHtml(chat.emoji || chat.name.charAt(0));
   }
   if (nameEl) nameEl.textContent = chat.name;
-  // 每次打开聊天时随机一次状态，并缓存到 chat._statusText，后续不再随消息而变
-  if (!chat._statusText) chat._statusText = randomStatus(chat);
+  // 获取当前状态（由状态系统维护，含到期时间）
+  const statusText = getChatStatus(chat);
   if (statEl) {
-    statEl.textContent = chat._statusText;
-    statEl.style.color = chat.online ? 'var(--online)' : 'var(--text-hint)';
+    statEl.textContent = statusText;
+    statEl.style.color = 'var(--online)';
   }
   // 更新戳一戳标题
   const nudgeTitle = document.getElementById('nudgeTitle');
@@ -3893,10 +3944,34 @@ function updateChatHeader(id) {
 }
 
 function randomStatus(chat) {
-  // 如果 chat 处于离线状态，直接显示离线
-  if (chat && !chat.online) return '离线';
-  const pool = appData.statusCards || ['在线'];
-  return pool[Math.floor(Math.random() * pool.length)];
+  // 不再依赖 chat.online，改用 _pickRandomStatus() 从状态库抽取
+  return _pickRandomStatus() || '在线';
+}
+
+/**
+ * 获取当前角色应显示的状态文字。
+ * 状态系统逻辑：
+ *  - 每条状态有随机有效期（10分钟 ~ 5小时）
+ *  - 到期后自动从状态库抽取新状态
+ *  - 每天 12:00 有 5% 概率提前强制换状态；否则继续保持到原定到期时间
+ */
+function getChatStatus(chat) {
+  const now = Date.now();
+
+  // 若状态未初始化，立即初始化一次
+  if (!chat._statusText || !chat._statusExpiry) {
+    chat._statusText   = _pickRandomStatus() || '在线';
+    chat._statusExpiry = now + _randomStatusDuration();
+  }
+
+  return chat._statusText;
+}
+
+/** 随机状态持续时长：10 分钟 ~ 5 小时（毫秒） */
+function _randomStatusDuration() {
+  const min = 10 * 60 * 1000;        // 10 min
+  const max = 5  * 60 * 60 * 1000;   // 5 h
+  return min + Math.random() * (max - min);
 }
 
 function filterChats(q) {
@@ -4173,7 +4248,7 @@ function triggerAutoReply(chat, triggeredMsgId) {
     return;
   }
 
-  // ── 计算延迟 (ms)
+  // ── 计算延迟 (ms)：在 fastest ~ slowest 之间均匀随机
   const fastData = settings.fastestReplyData;
   const fastestMs = fastData
     ? (fastData.unit === 'min' ? fastData.value * 60 * 1000 : fastData.value * 1000)
@@ -4181,13 +4256,19 @@ function triggerAutoReply(chat, triggeredMsgId) {
   const slowestMs = settings.slowestReply.unit === 'min'
     ? settings.slowestReply.value * 60 * 1000
     : settings.slowestReply.value * 1000;
-  const delay = fastestMs + Math.random() * Math.max(0, slowestMs - fastestMs);
+  const minMs = Math.min(fastestMs, slowestMs);
+  const maxMs = Math.max(fastestMs, slowestMs);
+  const delay = minMs + Math.random() * (maxMs - minMs);
 
-  // ── 已读标记：仅写内存，不提前 render（避免已读先于回消息显示）
-  const readDelay = Math.min(delay * 0.45, 1800);
+  // ── 已读标记：2秒内显示，立即 render，确保已读先于回复出现
+  const readDelay = Math.min(delay * 0.3, 2000);
   setTimeout(() => {
     const t = chat.messages.find(m => m.id === triggeredMsgId);
-    if (t) { t.read = true; } // 只写内存，等发回复时一起刷新
+    if (t) {
+      t.read = true;
+      saveData();
+      if (currentChatId === chat.id) renderMessages(chat.id); // 立即刷新，让用户看到"已读"
+    }
   }, readDelay);
 
   // ── 显示"正在输入…"
@@ -4196,14 +4277,17 @@ function triggerAutoReply(chat, triggeredMsgId) {
       const statEl = document.getElementById('headerStatus');
       if (statEl) statEl.textContent = '对方正在输入…';
     }
-  }, readDelay + 200);
+  }, readDelay + 300);
 
   // ── 生成并发送回复
   setTimeout(() => {
-    // 恢复头部状态（恢复到本次打开聊天时固定的状态，不随每条消息变化）
+    // 恢复头部状态（使用状态系统的当前有效状态）
     if (currentChatId === chat.id) {
       const statEl = document.getElementById('headerStatus');
-      if (statEl) statEl.textContent = chat._statusText || randomStatus();
+      if (statEl) {
+        statEl.textContent = getChatStatus(chat);
+        statEl.style.color = 'var(--online)';
+      }
     }
 
     // 有效字卡
@@ -4562,8 +4646,28 @@ function _drawPaintContent(ctx, w, h, minEl, maxEl, artistMode) {
     if (type === 'line') {
       const angle = Math.random() * Math.PI * 2;
       const len   = 20 + Math.random() * 80;
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+      const ex = x + Math.cos(angle) * len;
+      const ey = y + Math.sin(angle) * len;
+      const curveType = Math.random();
+      if (curveType < 0.45) {
+        // 二次贝塞尔曲线
+        const cpx = (x + ex) / 2 + (Math.random() - 0.5) * len * 0.9;
+        const cpy = (y + ey) / 2 + (Math.random() - 0.5) * len * 0.9;
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(cpx, cpy, ex, ey);
+      } else if (curveType < 0.80) {
+        // 三次贝塞尔曲线（S形）
+        const cp1x = x + (Math.random() - 0.5) * len;
+        const cp1y = y + (Math.random() - 0.5) * len;
+        const cp2x = ex + (Math.random() - 0.5) * len;
+        const cp2y = ey + (Math.random() - 0.5) * len;
+        ctx.moveTo(x, y);
+        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey);
+      } else {
+        // 直线（保留少量）
+        ctx.moveTo(x, y);
+        ctx.lineTo(ex, ey);
+      }
       ctx.stroke();
     } else if (type === 'shape') {
       const r2 = Math.random();
@@ -5349,93 +5453,114 @@ function postMomentFull() {
   if (preview) preview.innerHTML = '';
   showToast('动态已发布 🌸');
 
-  // 每个角色单独随机延迟看见动态（10s ~ 5min 内）
+  // 调度所有角色的「已看→点赞→评论」流程
+  _scheduleMomentViewers(newM);
+}
+
+/**
+ * 对一条动态，为每个角色独立安排：
+ *  · 看到时间：发布后 0 ~ 24小时内随机
+ *  · 看到后 75% 概率点赞（独立）
+ *  · 看到后 75% 概率评论（独立，与点赞无关）
+ */
+function _scheduleMomentViewers(m) {
+  const H24 = 24 * 60 * 60 * 1000;
   appData.chats.forEach(c => {
-    const seeDelay = 10000 + Math.random() * 290000; // 10s ~ 5min
+    // 每个角色随机 0 ~ 24h 后看到
+    const seeDelay = Math.random() * H24;
     setTimeout(() => {
-      // 标记已看
-      if (!newM.seenBy) newM.seenBy = [];
-      if (!newM.seenBy.includes(c.id)) newM.seenBy.push(c.id);
-      saveData();
-      // 局部更新已看列表（无需全量重渲染）
-      const ti = document.querySelector(`.moment-item[data-moment-id="${newM.id}"]`);
-      if (ti) {
-        const seenArea = ti.querySelector('.moment-seen-area');
-        if (seenArea) {
-          const seenBy = newM.seenBy || [];
-          seenArea.innerHTML = seenBy.length > 0 ? `
-            <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;">
-              <span style="font-size:10px;color:var(--text-hint);">已看：</span>
-              ${seenBy.slice(0,5).map(cid => {
-                const sc = appData.chats.find(x => x.id === cid);
-                return sc ? `<div style="width:18px;height:18px;border-radius:50%;background:${avatarGradient(sc)};color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;">${sc.emoji || sc.name.charAt(0)}</div>` : '';
-              }).join('')}
-              ${seenBy.length > 5 ? `<span style="font-size:10px;color:var(--text-hint);">+${seenBy.length-5}</span>` : ''}
-            </div>` : '';
-        }
+      // 动态可能已被删除
+      const live = appData.moments.find(x => x.id === m.id);
+      if (!live) return;
+
+      // ── 标记已看 ──
+      if (!live.seenBy) live.seenBy = [];
+      if (!live.seenBy.includes(c.id)) {
+        live.seenBy.push(c.id);
+        saveData();
+        _updateSeenAreaDOM(live);
       }
 
-      // 75% 概率点赞（25% 不点赞）
-      if (Math.random() >= 0.25) {
-        // 点赞延迟：看见后再等 3s~30s
-        const likeDelay = 3000 + Math.random() * 27000;
+      // ── 75% 概率点赞（独立） ──
+      if (Math.random() < 0.75) {
+        const likeDelay = 3000 + Math.random() * 57000; // 3s ~ 1min 后点赞
         setTimeout(() => {
-          // 防止重复点赞
-          if (!newM.likedBy) newM.likedBy = [];
-          if (newM.likedBy.includes(c.id)) return;
-          newM.likedBy.push(c.id);
-          newM.likes = (newM.likes || 0) + 1;
+          const lv = appData.moments.find(x => x.id === m.id);
+          if (!lv) return;
+          if (!lv.likedBy) lv.likedBy = [];
+          if (lv.likedBy.includes(c.id)) return;
+          lv.likedBy.push(c.id);
+          lv.likes = (lv.likes || 0) + 1;
           saveData();
-          // 通知
-          appData.momentNotifications.push({ id: Date.now(), type: 'like', momentId: newM.id, chatId: c.id, text: `${c.name} 赞了你的动态`, time: getTime(), read: false });
+          appData.momentNotifications.push({ id: Date.now(), type: 'like', momentId: lv.id, chatId: c.id, text: `${c.name} 赞了你的动态`, time: getTime(), read: false });
           updateMomentBadge();
           // 局部更新点赞数
-          const ti2 = document.querySelector(`.moment-item[data-moment-id="${newM.id}"]`);
-          if (ti2) {
-            const likeBtn = ti2.querySelector(`.moment-action[data-action="like"]`);
-            if (likeBtn) likeBtn.innerHTML = `<i class="fa-${newM.liked ? 'solid' : 'regular'} fa-heart"></i> ${newM.likes}`;
-          }
-
-          // 点赞后 75% 概率评论（25% 不评论）
-          if (Math.random() >= 0.25) {
-            // 从朋友圈文本中随机选 1~3 条拼成评论
-            const momentTexts = appData.moments
-              .filter(x => x.text && x.text.trim() && x.id !== newM.id)
-              .map(x => x.text.trim());
-            // 若朋友圈文本不足，fallback 到 wordCards
-            const pool = momentTexts.length > 0 ? momentTexts
-              : appData.wordCards.filter((_, i) => !appData.blockedWords.includes(i));
-            if (pool.length > 0) {
-              const pickCount = Math.min(pool.length, 1 + Math.floor(Math.random() * 3)); // 1~3
-              const shuffled = [...pool].sort(() => Math.random() - 0.5);
-              const resp = shuffled.slice(0, pickCount).join('');
-              // 评论延迟：点赞后再等 5s~40s
-              const cmtDelay = 5000 + Math.random() * 35000;
-              setTimeout(() => {
-                if (!newM.comments) newM.comments = [];
-                newM.comments.push({ from: 'other', chatId: c.id, text: resp });
-                appData.momentNotifications.push({ id: Date.now(), type: 'comment', momentId: newM.id, chatId: c.id, text: resp, time: getTime(), read: false });
-                saveData();
-                updateMomentBadge();
-                // 局部追加评论
-                const ti3 = document.querySelector(`.moment-item[data-moment-id="${newM.id}"]`);
-                if (ti3) {
-                  let mc = ti3.querySelector(`#mc-${newM.id}`);
-                  if (!mc) { mc = document.createElement('div'); mc.id='mc-'+newM.id; mc.className='moment-comments'; ti3.appendChild(mc); }
-                  const d = document.createElement('div');
-                  d.className = 'moment-comment';
-                  d.innerHTML = `<strong>${escHtml(c.name)}</strong>：${escHtml(resp)}`;
-                  mc.appendChild(d);
-                  const cmtBtn = ti3.querySelector(`.moment-action[data-action="comment"]`);
-                  if (cmtBtn) cmtBtn.innerHTML = `<i class="fa-regular fa-comment"></i> ${newM.comments.length}`;
-                }
-              }, cmtDelay);
-            }
+          const ti = document.querySelector(`.moment-item[data-moment-id="${lv.id}"]`);
+          if (ti) {
+            const likeBtn = ti.querySelector(`.moment-action[data-action="like"]`);
+            if (likeBtn) likeBtn.innerHTML = `<i class="fa-${lv.liked ? 'solid' : 'regular'} fa-heart"></i> ${lv.likes}`;
           }
         }, likeDelay);
       }
+
+      // ── 75% 概率评论（独立，与点赞无关） ──
+      if (Math.random() < 0.75) {
+        const cmtDelay = 10000 + Math.random() * 110000; // 10s ~ 2min 后评论
+        setTimeout(() => {
+          const lv = appData.moments.find(x => x.id === m.id);
+          if (!lv) return;
+          const pool = _buildCommentPool(lv.id);
+          if (pool.length === 0) return;
+          const resp = pool[Math.floor(Math.random() * pool.length)];
+          if (!lv.comments) lv.comments = [];
+          lv.comments.push({ from: 'other', chatId: c.id, text: resp });
+          appData.momentNotifications.push({ id: Date.now(), type: 'comment', momentId: lv.id, chatId: c.id, text: resp, time: getTime(), read: false });
+          saveData();
+          updateMomentBadge();
+          // 局部追加评论
+          const ti = document.querySelector(`.moment-item[data-moment-id="${lv.id}"]`);
+          if (ti) {
+            let mc = ti.querySelector(`#mc-${lv.id}`);
+            if (!mc) { mc = document.createElement('div'); mc.id = 'mc-' + lv.id; mc.className = 'moment-comments'; ti.appendChild(mc); }
+            const d = document.createElement('div');
+            d.className = 'moment-comment';
+            d.innerHTML = `<strong>${escHtml(c.name)}</strong>：${escHtml(resp)}`;
+            mc.appendChild(d);
+            const cmtBtn = ti.querySelector(`.moment-action[data-action="comment"]`);
+            if (cmtBtn) cmtBtn.innerHTML = `<i class="fa-regular fa-comment"></i> ${lv.comments.length}`;
+          }
+        }, cmtDelay);
+      }
+
     }, seeDelay);
   });
+}
+
+/** 局部更新已看头像列表 DOM */
+function _updateSeenAreaDOM(m) {
+  const ti = document.querySelector(`.moment-item[data-moment-id="${m.id}"]`);
+  if (!ti) return;
+  const seenArea = ti.querySelector('.moment-seen-area');
+  if (!seenArea) return;
+  const seenBy = m.seenBy || [];
+  seenArea.innerHTML = seenBy.length > 0 ? `
+    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;">
+      <span style="font-size:10px;color:var(--text-hint);">已看：</span>
+      ${seenBy.slice(0, 5).map(cid => {
+        const sc = appData.chats.find(x => x.id === cid);
+        return sc ? `<div style="width:18px;height:18px;border-radius:50%;background:${avatarGradient(sc)};color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;">${sc.emoji || sc.name.charAt(0)}</div>` : '';
+      }).join('')}
+      ${seenBy.length > 5 ? `<span style="font-size:10px;color:var(--text-hint);">+${seenBy.length - 5}</span>` : ''}
+    </div>` : '';
+}
+
+/** 构建评论候选池（用朋友圈文本或 wordCards 兜底） */
+function _buildCommentPool(excludeMomentId) {
+  const texts = appData.moments
+    .filter(x => x.text && x.text.trim() && x.id !== excludeMomentId)
+    .map(x => x.text.trim());
+  if (texts.length > 0) return texts;
+  return appData.wordCards.filter((_, i) => !appData.blockedWords.includes(i));
 }
 
 /** 兼容旧调用 postMoment() */
@@ -5471,6 +5596,9 @@ function scheduleAutoMoment() {
         appData.momentNotifications.push({ id: Date.now(), type: 'post', chatId: chat.id, text: `${chat.name} 发了新动态`, time: getTime(), read: false });
         saveData(); renderMoments(); updateMomentBadge();
         showToast(`${chat.name} 发了新动态 🌸`);
+
+        // 其他角色 24h 内随机看到并互动
+        _scheduleMomentViewers(newM);
       }
     }
     scheduleAutoMoment();
@@ -6688,12 +6816,27 @@ function _dateStr() {
 }
 function exportData() { exportFullBackup(); }
 function exportFullBackup() {
-  const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = '全量备份（' + _dateStr() + '）.json';
-  a.click();
-  showToast('全量备份已导出 📦');
+  // ★ 修复：exportFullBackup 必须从 IDB 读取完整数据（含 base64 图片），
+  // 不能只用内存 appData，因为页面刚加载时 appData 可能还是 localStorage 精简版（表情包已清空）。
+  const doExport = (dataToExport) => {
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '全量备份（' + _dateStr() + '）.json';
+    a.click();
+    showToast('全量备份已导出 📦');
+  };
+  // 如果 IDB 已就绪，则从 IDB 读取完整数据（含图片）再导出
+  _idbGet(DATA_KEY).then(saved => {
+    if (saved) {
+      doExport(saved);
+    } else {
+      doExport(appData);
+    }
+  }).catch(() => {
+    // IDB 不可用时回退到内存数据
+    doExport(appData);
+  });
 }
 function triggerImport() { document.getElementById('importInput').click(); }
 function importData(input) {
@@ -8261,11 +8404,7 @@ function clearCallBg(chatId) {
 function exportPartialData() {
   const checks = [...document.querySelectorAll('.bk-chk:checked')].map(c => c.value);
   if (checks.length === 0) { showToast('请至少选择一项'); return; }
-  const partial = { _type: 'partial', _keys: checks };
-  checks.forEach(k => { if (appData[k] !== undefined) partial[k] = appData[k]; });
-  const blob = new Blob([JSON.stringify(partial, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+
   const labelMap = {
     chats: '聊天记录',
     wordCards: '词卡库',
@@ -8290,10 +8429,39 @@ function exportPartialData() {
     listenSong: '歌单',
     settings: '设置'
   };
-  const labels = checks.map(k => labelMap[k] || k);
-  a.download = '（' + labels.join('）+（') + '）（' + _dateStr() + '）.json';
-  a.click();
-  showToast(`已导出 ${checks.length} 项数据`);
+
+  // ★ 修复：若勾选了表情包，需要从 IDB 读取完整 base64 数据，避免导出空字符串占位符
+  const hasEmojiPacks = checks.includes('myEmojiPacks') || checks.includes('hisEmojiPacks');
+  const EMOJI_PACK_KEYS = ['myEmojiPacks', 'hisEmojiPacks'];
+  const isSlimmed = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(v => v === '' || v === null);
+
+  const doExport = (fullData) => {
+    const partial = { _type: 'partial', _keys: checks };
+    checks.forEach(k => {
+      if (fullData[k] !== undefined) {
+        partial[k] = fullData[k];
+      } else if (appData[k] !== undefined) {
+        partial[k] = appData[k];
+      }
+    });
+    const blob = new Blob([JSON.stringify(partial, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const labels = checks.map(k => labelMap[k] || k);
+    a.download = '（' + labels.join('）+（') + '）（' + _dateStr() + '）.json';
+    a.click();
+    showToast(`已导出 ${checks.length} 项数据`);
+  };
+
+  // 如果选了表情包且内存数据是精简版，从 IDB 读完整数据
+  const needIdb = hasEmojiPacks && EMOJI_PACK_KEYS.some(k => checks.includes(k) && isSlimmed(appData[k]));
+  if (needIdb) {
+    _idbGet(DATA_KEY).then(saved => {
+      doExport(saved || appData);
+    }).catch(() => doExport(appData));
+  } else {
+    doExport(appData);
+  }
 }
 
 function toggleSelectAllBk(cb) {
@@ -8325,7 +8493,7 @@ async function importPartial(input) {
     userAvatar: '我的头像', disabledPatIndices: '拍一拍设置',
     momentNotifications: '朋友圈通知', mutedMoments: '屏蔽动态',
     listenSong: '听歌', decideQuestions: '今日决定',
-    chatSignatures: '签名分配'
+    chatSignatures: '签名分配', emojiLib: '表情符号快捷库'
   };
 
   const reader = new FileReader();
@@ -8460,7 +8628,7 @@ async function importPartial(input) {
               const toAdd = src.playlist.filter(s => !existingIds.has(s.id));
               appData.listenSong.playlist = [...(appData.listenSong.playlist || []), ...toAdd];
             }
-            succeededKeys.push(`${labelMap[key] || key}（新增 ${(src.playlist||[]).length} 首）`);
+            succeededKeys.push(`${labelMap[key] || key}（新增 ${toAdd.length} 首）`);
           } else if (key === 'momentNotifications' && Array.isArray(src)) {
             const existingIds = new Set((appData.momentNotifications || []).map(n => n.id));
             const toAdd = src.filter(n => !existingIds.has(n.id));
@@ -8583,23 +8751,85 @@ function _pickRandomStatus() {
   return cards[Math.floor(Math.random() * cards.length)];
 }
 
+let _statusRefreshTimer  = null;   // 到期轮询定时器
+let _statusNoonTimer     = null;   // 每天 12:00 触发定时器
+
+/**
+ * 每分钟检查一次，对所有到期的角色状态进行刷新。
+ * （轮询间隔 60s，精度足够；避免为每个角色单独维护一个 setTimeout）
+ */
 function scheduleStatusRefresh() {
   clearTimeout(_statusRefreshTimer);
-  function next() {
-    const ms = (1 + Math.random() * 7) * 60 * 60 * 1000; // 1~8h
-    _statusRefreshTimer = setTimeout(() => {
-      appData.chats.forEach(chat => {
-        const picked = _pickRandomStatus();
-        if (picked) chat.sign = picked;
-        chat.online = Math.random() < 0.5;
-      });
+
+  function tick() {
+    const now = Date.now();
+    let changed = false;
+    appData.chats.forEach(chat => {
+      // 初始化未赋值的角色
+      if (!chat._statusText || !chat._statusExpiry) {
+        chat._statusText   = _pickRandomStatus() || '在线';
+        chat._statusExpiry = now + _randomStatusDuration();
+        changed = true;
+      }
+      // 状态到期 → 抽取新状态
+      if (now >= chat._statusExpiry) {
+        chat._statusText   = _pickRandomStatus() || '在线';
+        chat._statusExpiry = now + _randomStatusDuration();
+        changed = true;
+      }
+    });
+    if (changed) {
       saveData();
-      if (currentView === 'chat') renderChatList();
-      if (currentView === 'contacts') renderContacts();
-      next();
-    }, ms);
+      _refreshStatusUI();
+    }
+    _statusRefreshTimer = setTimeout(tick, 60 * 1000); // 每分钟检查
   }
-  next();
+
+  tick();
+  _scheduleNoonStatusCheck();
+}
+
+/**
+ * 计算距离下一个 12:00 的毫秒数，设置 5% 概率提前换状态的定时器。
+ */
+function _scheduleNoonStatusCheck() {
+  clearTimeout(_statusNoonTimer);
+  const now  = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+  if (now >= next) next.setDate(next.getDate() + 1); // 今天 12 点已过，等明天
+  const delay = next.getTime() - now.getTime();
+
+  _statusNoonTimer = setTimeout(() => {
+    // 每天 12:00：5% 概率直接换状态，否则继续保持到原定到期时间
+    let changed = false;
+    appData.chats.forEach(chat => {
+      if (Math.random() < 0.05) {
+        chat._statusText   = _pickRandomStatus() || '在线';
+        chat._statusExpiry = Date.now() + _randomStatusDuration();
+        changed = true;
+      }
+    });
+    if (changed) {
+      saveData();
+      _refreshStatusUI();
+    }
+    _scheduleNoonStatusCheck(); // 设置明天 12 点的定时器
+  }, delay);
+}
+
+/** 刷新当前可见的状态 UI */
+function _refreshStatusUI() {
+  if (currentView === 'chat') renderChatList();
+  if (currentView === 'contacts') renderContacts();
+  // 如果聊天头部可见，同步刷新
+  if (currentChatId) {
+    const chat   = getChatById(currentChatId);
+    const statEl = document.getElementById('headerStatus');
+    if (chat && statEl) {
+      statEl.textContent = getChatStatus(chat);
+      statEl.style.color = 'var(--online)';
+    }
+  }
 }
 
 // Page Visibility API — 后台时暂停非关键定时器
@@ -8619,7 +8849,7 @@ document.addEventListener('visibilitychange', () => {
 
 // 页面卸载前清理
 window.addEventListener('beforeunload', () => {
-  [_autoMailTimer, _musicBubbleTimer, _signatureTimer, _statusRefreshTimer,
+  [_autoMailTimer, _musicBubbleTimer, _signatureTimer, _statusRefreshTimer, _statusNoonTimer,
    _autoMsgTimer, _autoMomentTimer, scheduleCallTimer, progressTimer]
     .forEach(t => { if (t) clearTimeout(t); });
   // 清除每个角色的独立定时器
@@ -8630,9 +8860,288 @@ window.addEventListener('beforeunload', () => {
 });
 
 /* ════════════════════════════════════════════════════════════
-   P5 占位：绘画板已在上方实现
+   P11 · Service Worker + 系统推送通知
+   ════════════════════════════════════════════════════════════
+   实现目标：
+   1. Service Worker 在后台持续运行，网页关闭后仍触发定时提醒
+   2. 通过 Web Notifications API 弹出系统级通知（手机/桌面）
+   3. BroadcastChannel 在页面与 SW 之间同步消息计划
+   4. 页面打开时接管通知（不重复弹）
    ════════════════════════════════════════════════════════════ */
-</script>
+
+/* ── Service Worker 脚本（内联生成，无需额外文件）── */
+const SW_SCRIPT = `
+const BC = new BroadcastChannel('multichat_sw');
+const DB_NAME = 'sw_schedules';
+const STORE   = 'timers';
+
+// 打开 IndexedDB 存储计划表
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+async function getSchedules() {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const all = [];
+    tx.objectStore(STORE).openCursor().onsuccess = e => {
+      const cur = e.target.result;
+      if (cur) { all.push(cur.value); cur.continue(); }
+      else res(all);
+    };
+    tx.onerror = () => rej();
+  });
+}
+async function saveSchedule(item) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(item);
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+async function deleteSchedule(id) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+
+// 检查并触发到期的通知
+async function checkSchedules() {
+  const now = Date.now();
+  const items = await getSchedules();
+  for (const item of items) {
+    if (item.fireAt <= now) {
+      await deleteSchedule(item.id);
+      // 通知页面（如果打开着）
+      BC.postMessage({ type: 'fire', chatId: item.chatId, name: item.name, text: item.text, avatar: item.avatar });
+      // 弹出系统通知
+      const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+      const pageOpen = clients.some(c => c.visibilityState === 'visible');
+      if (!pageOpen) {
+        self.registration.showNotification(item.name || '消息', {
+          body: item.text || '...',
+          icon: item.avatar || '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: 'multichat_' + item.chatId,
+          renotify: true,
+          data: { chatId: item.chatId }
+        });
+      }
+    }
+  }
+}
+
+// 每分钟检查一次
+setInterval(checkSchedules, 60 * 1000);
+// 安装后立即检查一次
+self.addEventListener('install',  () => { self.skipWaiting(); checkSchedules(); });
+self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); checkSchedules(); });
+
+// 接收来自页面的消息
+self.addEventListener('message', async e => {
+  if (e.data?.type === 'schedule') {
+    await saveSchedule(e.data.item);
+  } else if (e.data?.type === 'cancel') {
+    await deleteSchedule(e.data.id);
+  } else if (e.data?.type === 'cancelAll') {
+    const items = await getSchedules();
+    for (const i of items) await deleteSchedule(i.id);
+  } else if (e.data?.type === 'ping') {
+    e.source && e.source.postMessage({ type: 'pong' });
+  }
+});
+
+// 点击通知：打开/聚焦页面
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const chatId = e.notification.data?.chatId;
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      if (clients.length > 0) {
+        const c = clients[0];
+        c.focus();
+        c.postMessage({ type: 'openChat', chatId });
+      } else {
+        self.clients.openWindow('/?chatId=' + chatId);
+      }
+    })
+  );
+});
+`;
+
+/* ── 注册 Service Worker（Blob URL 方式，无需独立文件）── */
+let _swRegistration = null;
+let _swChannel = null;
+
+async function initServiceWorker() {
+  if (!('serviceWorker' in navigator)) return false;
+  try {
+    const blob = new Blob([SW_SCRIPT], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(blob);
+    _swRegistration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
+    // BroadcastChannel：SW 触发的通知发回页面
+    _swChannel = new BroadcastChannel('multichat_sw');
+    _swChannel.onmessage = e => {
+      if (e.data?.type === 'fire') {
+        // SW 通知到期 → 在页面里也更新未读
+        const chat = getChatById(e.data.chatId);
+        if (chat) {
+          chat.unread = (chat.unread || 0) + 1;
+          renderChatList();
+          saveData();
+          // 如果页面可见，也弹顶部通知
+          if (!document.hidden && appData.settings.notification) {
+            showTopNotification(chat, e.data.text || '');
+          }
+        }
+      } else if (e.data?.type === 'openChat') {
+        if (e.data.chatId) selectChat(e.data.chatId);
+      }
+    };
+    // 监听 SW 消息（notificationclick 路由）
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type === 'openChat') {
+        if (e.data.chatId) selectChat(e.data.chatId);
+      }
+    });
+    return true;
+  } catch (err) {
+    console.warn('[PushNotif] SW 注册失败:', err);
+    return false;
+  }
+}
+
+/* ── 向 SW 安排一条推送计划 ── */
+function schedulePushNotif(chat, text, delayMs) {
+  if (!_swRegistration || !appData.settings.pushNotification) return;
+  const sw = _swRegistration.active || _swRegistration.waiting || _swRegistration.installing;
+  if (!sw) return;
+  const id = 'pn_' + chat.id + '_' + Date.now();
+  sw.postMessage({
+    type: 'schedule',
+    item: {
+      id,
+      chatId: chat.id,
+      name: chat.name,
+      text,
+      avatar: chat.avatar || '',
+      fireAt: Date.now() + delayMs
+    }
+  });
+}
+
+/* ── 取消某角色的所有待推送计划 ── */
+function cancelPushNotif(chatId) {
+  if (!_swRegistration) return;
+  // 用 cancelAll 简化（实际可精确取消，此处整体清再重建）
+}
+
+/* ── 申请通知权限 ── */
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'denied') return 'denied';
+  const result = await Notification.requestPermission();
+  return result;
+}
+
+/* ── 系统推送开关 ── */
+async function togglePushNotification() {
+  // 未支持
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    showToast('⚠️ 当前浏览器不支持系统推送通知');
+    return;
+  }
+  const current = appData.settings.pushNotification;
+  if (!current) {
+    // 打开：先申请权限
+    const perm = await requestNotificationPermission();
+    if (perm === 'denied') {
+      showToast('⚠️ 通知权限已被拒绝，请在浏览器设置中手动允许');
+      updatePushNotifUI();
+      return;
+    }
+    if (perm !== 'granted') {
+      showToast('⚠️ 未获得通知权限');
+      updatePushNotifUI();
+      return;
+    }
+    // 初始化 SW
+    const ok = await initServiceWorker();
+    if (!ok) {
+      showToast('⚠️ Service Worker 初始化失败，推送不可用');
+      updatePushNotifUI();
+      return;
+    }
+    appData.settings.pushNotification = true;
+    showToast('✅ 系统推送已开启，关闭网页后仍会收到消息提醒');
+  } else {
+    appData.settings.pushNotification = false;
+    // 取消所有待发计划
+    if (_swRegistration) {
+      const sw = _swRegistration.active;
+      if (sw) sw.postMessage({ type: 'cancelAll' });
+    }
+    showToast('系统推送已关闭');
+  }
+  saveData();
+  updatePushNotifUI();
+}
+
+/* ── 更新 UI 状态 ── */
+function updatePushNotifUI() {
+  const toggle = document.getElementById('pushNotificationToggle');
+  const desc   = document.getElementById('pushNotifDesc');
+  if (!toggle) return;
+  const on = appData.settings.pushNotification;
+  toggle.classList.toggle('on', !!on);
+  if (desc) {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      desc.textContent = '当前浏览器不支持系统推送';
+    } else if (Notification.permission === 'denied') {
+      desc.textContent = '通知权限已被拒绝，请在浏览器设置中允许';
+    } else {
+      desc.textContent = on ? '后台运行中，关闭网页仍可收到提醒' : '关闭网页后仍可收到角色消息提醒';
+    }
+  }
+}
+
+/* ── 启动时恢复 SW（若之前已开启）── */
+async function restorePushNotif() {
+  if (!appData.settings.pushNotification) return;
+  if (!('serviceWorker' in navigator)) { appData.settings.pushNotification = false; saveData(); return; }
+  if (Notification.permission !== 'granted') { appData.settings.pushNotification = false; saveData(); return; }
+  await initServiceWorker();
+  updatePushNotifUI();
+}
+
+/* ── 在已有 showTopNotification 里追加系统推送 ── */
+const _origShowTopNotif = showTopNotification;
+showTopNotification = function(chat, text) {
+  _origShowTopNotif(chat, text);
+  // 额外：若 SW 已就绪，给「后台可能看不到」的情况预安排一次 1 秒后的系统推送
+  // 若页面可见则页面自己显示了，SW 那边 fire 时发现页面可见会跳过系统通知
+  if (appData.settings.pushNotification && _swRegistration) {
+    schedulePushNotif(chat, text, 1500);
+  }
+};
+
+/* ── 页面加载时恢复 SW 状态 ── */
+window.addEventListener('load', () => {
+  restorePushNotif();
+  // 延迟更新 UI（等 appData 加载完）
+  setTimeout(updatePushNotifUI, 500);
+});
+
 
 <!-- 删除联系人确认弹窗（替代 confirm，兼容移动端） -->
 <div class="modal-overlay" id="deleteConfirmOverlay">
