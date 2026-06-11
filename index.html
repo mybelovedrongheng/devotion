@@ -8723,8 +8723,6 @@ function initAllTimers() {
   scheduleCharPaintTimers(); // P3: 每10分钟1%概率发送绘画
 }
 
-let _statusRefreshTimer = null;
-
 /** 从状态库中随机选取一条状态（支持分组权重） */
 function _pickRandomStatus() {
   const groups = appData.statusCardGroups || {};
