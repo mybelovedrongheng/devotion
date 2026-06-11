@@ -567,7 +567,6 @@ body {
 .top-notification.hiding {
   transform: translateX(-50%) translateY(calc(-100% - 24px));
   opacity: 0;
-  pointer-events: none;
   transition: transform .3s cubic-bezier(.4,0,.6,1), opacity .25s ease;
 }
 @keyframes notifCardIn {
@@ -3540,18 +3539,9 @@ async function loadDataAsync() {
     // 则优先保留 IDB 里的用户数据，避免用默认值覆盖用户数据。
     const USER_ARRAY_KEYS = ['statusCards','statusCardGroups','myEmojiPacks','hisEmojiPacks','emojiLib','blockedWords','patMessages','disabledPatIndices','moments'];
     const memIsDefault = (key) => JSON.stringify(appData[key]) === JSON.stringify(DEFAULT_DATA[key]);
-    // ★ 表情包修复：_slimData 会将 myEmojiPacks/hisEmojiPacks 里的 base64 全部替换为 ''
-    // localStorage 恢复后，内存里是 ['','',''] 之类的空字符串数组，不等于默认值 []，
-    // 导致 memIsDefault 返回 false，IDB 里的完整图片数据被空字符串数组覆盖。
-    // 修复：对图片类数组额外检测"全部为空字符串"的情况，同样视为需要从 IDB 恢复。
-    const EMOJI_PACK_KEYS = ['myEmojiPacks', 'hisEmojiPacks'];
-    const memIsSlimmed = (key) => {
-      const arr = appData[key];
-      return Array.isArray(arr) && arr.length > 0 && arr.every(v => v === '' || v === null || v === undefined);
-    };
     for (const k of USER_ARRAY_KEYS) {
-      if ((memIsDefault(k) || (EMOJI_PACK_KEYS.includes(k) && memIsSlimmed(k))) && idbBase[k] !== undefined) {
-        // 内存里的值等于默认值，或是被 _slimData 清空的表情包占位数组，用 IDB 完整值替代
+      if (memIsDefault(k) && idbBase[k] !== undefined) {
+        // 内存里的值等于默认值，说明本次启动没有加载到持久化数据，用 IDB 值替代
         appData[k] = idbBase[k];
       }
     }
@@ -6817,27 +6807,12 @@ function _dateStr() {
 }
 function exportData() { exportFullBackup(); }
 function exportFullBackup() {
-  // ★ 修复：exportFullBackup 必须从 IDB 读取完整数据（含 base64 图片），
-  // 不能只用内存 appData，因为页面刚加载时 appData 可能还是 localStorage 精简版（表情包已清空）。
-  const doExport = (dataToExport) => {
-    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = '全量备份（' + _dateStr() + '）.json';
-    a.click();
-    showToast('全量备份已导出 📦');
-  };
-  // 如果 IDB 已就绪，则从 IDB 读取完整数据（含图片）再导出
-  _idbGet(DATA_KEY).then(saved => {
-    if (saved) {
-      doExport(saved);
-    } else {
-      doExport(appData);
-    }
-  }).catch(() => {
-    // IDB 不可用时回退到内存数据
-    doExport(appData);
-  });
+  const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '全量备份（' + _dateStr() + '）.json';
+  a.click();
+  showToast('全量备份已导出 📦');
 }
 function triggerImport() { document.getElementById('importInput').click(); }
 function importData(input) {
@@ -8405,7 +8380,11 @@ function clearCallBg(chatId) {
 function exportPartialData() {
   const checks = [...document.querySelectorAll('.bk-chk:checked')].map(c => c.value);
   if (checks.length === 0) { showToast('请至少选择一项'); return; }
-
+  const partial = { _type: 'partial', _keys: checks };
+  checks.forEach(k => { if (appData[k] !== undefined) partial[k] = appData[k]; });
+  const blob = new Blob([JSON.stringify(partial, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
   const labelMap = {
     chats: '聊天记录',
     wordCards: '词卡库',
@@ -8430,39 +8409,10 @@ function exportPartialData() {
     listenSong: '歌单',
     settings: '设置'
   };
-
-  // ★ 修复：若勾选了表情包，需要从 IDB 读取完整 base64 数据，避免导出空字符串占位符
-  const hasEmojiPacks = checks.includes('myEmojiPacks') || checks.includes('hisEmojiPacks');
-  const EMOJI_PACK_KEYS = ['myEmojiPacks', 'hisEmojiPacks'];
-  const isSlimmed = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(v => v === '' || v === null);
-
-  const doExport = (fullData) => {
-    const partial = { _type: 'partial', _keys: checks };
-    checks.forEach(k => {
-      if (fullData[k] !== undefined) {
-        partial[k] = fullData[k];
-      } else if (appData[k] !== undefined) {
-        partial[k] = appData[k];
-      }
-    });
-    const blob = new Blob([JSON.stringify(partial, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    const labels = checks.map(k => labelMap[k] || k);
-    a.download = '（' + labels.join('）+（') + '）（' + _dateStr() + '）.json';
-    a.click();
-    showToast(`已导出 ${checks.length} 项数据`);
-  };
-
-  // 如果选了表情包且内存数据是精简版，从 IDB 读完整数据
-  const needIdb = hasEmojiPacks && EMOJI_PACK_KEYS.some(k => checks.includes(k) && isSlimmed(appData[k]));
-  if (needIdb) {
-    _idbGet(DATA_KEY).then(saved => {
-      doExport(saved || appData);
-    }).catch(() => doExport(appData));
-  } else {
-    doExport(appData);
-  }
+  const labels = checks.map(k => labelMap[k] || k);
+  a.download = '（' + labels.join('）+（') + '）（' + _dateStr() + '）.json';
+  a.click();
+  showToast(`已导出 ${checks.length} 项数据`);
 }
 
 function toggleSelectAllBk(cb) {
