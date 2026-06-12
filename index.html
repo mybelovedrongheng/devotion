@@ -4196,18 +4196,23 @@ function sendMessage() {
   const msg = { id: Date.now(), from: 'self', type: 'text', text, time: getTime(), read: false };
 
   chat.messages.push(msg);
+  // 立刻清空输入框，给用户即时反馈
   input.value = '';
   input.style.height = '22px';
+  // 先渲染气泡（最高优先级，用户能立刻看到）
   appendBubble(msg, chat);
-  renderChatList();
-  saveData();
   closePlus();
 
   // 移动端：发送后保持键盘不收起
   setTimeout(() => { input.focus(); }, 0);
 
-  // 触发自动回复
-  triggerAutoReply(chat, msg.id);
+  // 把耗时操作推到下一帧，避免阻塞当前帧导致界面卡顿
+  requestAnimationFrame(() => {
+    renderChatList();
+    saveData();
+    // 触发自动回复
+    triggerAutoReply(chat, msg.id);
+  });
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -4783,10 +4788,17 @@ function handleEnter(e) {
     sendMessage();
   }
 }
+let _updateSendBtnRaf = null;
 function updateSendBtn() {
-  const input = document.getElementById('msgInput');
-  input.style.height = '22px';
-  input.style.height = Math.min(input.scrollHeight, 88) + 'px';
+  if (_updateSendBtnRaf) return; // 同一帧内只跑一次，避免重复 reflow
+  _updateSendBtnRaf = requestAnimationFrame(() => {
+    _updateSendBtnRaf = null;
+    const input = document.getElementById('msgInput');
+    // 先重置为 auto 而不是固定 22px，让浏览器只做一次 reflow
+    input.style.height = 'auto';
+    const h = Math.min(input.scrollHeight, 88);
+    input.style.height = h + 'px';
+  });
 }
 function quickInsertEmoji() {
   const panel = document.getElementById('emojiInputPanel');
