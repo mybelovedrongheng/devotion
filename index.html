@@ -1693,6 +1693,28 @@ body {
 .nudge-pop { animation: nudgePop .4s ease; }
 
 /* ============================================================
+   P2 · 拍一拍文案管理列表
+   ============================================================ */
+.pat-manage-item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pat-manage-item:last-child { border-bottom: none; }
+.pat-manage-text {
+  flex: 1; font-size: 13px; color: var(--text-main);
+  padding: 4px 6px; border-radius: 6px; cursor: text;
+  word-break: break-all; line-height: 1.5;
+  border: 1px solid transparent; transition: border-color .15s, background .15s;
+}
+.pat-manage-text:hover { background: var(--bg-hover,rgba(0,0,0,.04)); border-color: var(--border); }
+.pat-manage-text[contenteditable="true"] {
+  background: var(--input-bg, #fff); border-color: var(--primary);
+  outline: none; box-shadow: 0 0 0 2px var(--primary-light);
+}
+.pat-manage-text.disabled-pat { opacity: .38; text-decoration: line-through; }
+
+/* ============================================================
    P2 · 空状态 & 通用组件
    ============================================================ */
 .empty-state {
@@ -3611,8 +3633,18 @@ async function loadDataAsync() {
 
 /**
  * saveData() — 写入 IndexedDB（主存储），同时写一份不含大图片的副本到 localStorage（快速读取元数据）
+ *
+ * ★ 性能优化：saveData 在很多场景下会被高频调用（例如连续发送消息、自动回复等），
+ * 每次调用都会对整个 appData（可能包含大量 base64 图片）做结构化克隆并写入 IndexedDB，
+ * 这是一个较重的操作，若同步触发会导致发消息/切换聊天时明显卡顿。
+ * 这里改为「防抖」：短时间内的多次调用合并为一次真正的写入，
+ * 既减少了写入次数，又把耗时操作错开到空闲时机，避免阻塞 UI 渲染。
+ * 如需立即落盘（如页面隐藏/卸载前），调用 saveDataNow()。
  */
-function saveData() {
+let _saveDataTimer = null;
+
+function _saveDataImmediate() {
+  _saveDataTimer = null;
   // 异步写 IndexedDB（完整数据含图片）—— 仅在 IDB 已就绪后写入，避免用精简数据覆盖完整数据
   if (_idbReady) {
     _idbSet(DATA_KEY, appData).catch(e => {
@@ -3631,39 +3663,53 @@ function saveData() {
   }
 }
 
+function saveData() {
+  // 合并短时间内的多次保存请求，默认 600ms 后统一写入一次
+  if (_saveDataTimer) clearTimeout(_saveDataTimer);
+  _saveDataTimer = setTimeout(_saveDataImmediate, 600);
+}
+
+/** 立即写入（跳过防抖），用于页面隐藏/卸载等必须保证落盘的场景 */
+function saveDataNow() {
+  if (_saveDataTimer) { clearTimeout(_saveDataTimer); _saveDataTimer = null; }
+  _saveDataImmediate();
+}
+
 /**
  * _slimData() — 生成不含 base64 图片的精简数据副本，用于 localStorage
  * 只保留元数据，图片用占位符替换
  */
 function _slimData(data) {
-  const d = JSON.parse(JSON.stringify(data));
-  // 剥离动态图片
-  if (d.moments) {
-    d.moments = d.moments.map(m => ({ ...m, images: m.images ? m.images.map(() => '') : [] }));
-  }
-  // 剥离头像（base64）
-  if (d.chats) {
-    d.chats = d.chats.map(c => {
-      const nc = { ...c };
-      if (nc.avatar && nc.avatar.startsWith('data:')) nc.avatar = '';
-      if (nc.callBg && nc.callBg.startsWith('data:')) nc.callBg = '';
-      // 剥离消息中的图片
-      if (nc.messages) {
-        nc.messages = nc.messages.map(msg => {
-          if (msg.type === 'image' && msg.src && msg.src.startsWith('data:')) {
-            return { ...msg, src: '' };
-          }
-          return msg;
-        });
-      }
-      return nc;
-    });
-  }
-  if (d.myEmojiPacks)  d.myEmojiPacks  = d.myEmojiPacks.map(() => '');
-  if (d.hisEmojiPacks) d.hisEmojiPacks = d.hisEmojiPacks.map(() => '');
-  // 用户头像保留（已在上传时限制 3MB，允许持久化）
-  // bgImage 保留，允许朋友圈背景持久化（上传时已限制 5MB）
-  if (d.settings?.chatBg && d.settings.chatBg.startsWith('data:')) d.settings.chatBg = '';
+  // ★ 性能优化：避免 JSON.parse(JSON.stringify(data)) 整体深拷贝
+  // 改为只对含 base64 的字段做按需浅拷贝，无图片的对象直接复用引用
+  const d = {
+    ...data,
+    settings: data.settings ? {
+      ...data.settings,
+      chatBg: (data.settings.chatBg && data.settings.chatBg.startsWith('data:')) ? '' : (data.settings.chatBg || '')
+    } : data.settings,
+    moments: data.moments
+      ? data.moments.map(m => ({ ...m, images: m.images ? m.images.map(() => '') : [] }))
+      : data.moments,
+    myEmojiPacks:  data.myEmojiPacks  ? data.myEmojiPacks.map(() => '')  : data.myEmojiPacks,
+    hisEmojiPacks: data.hisEmojiPacks ? data.hisEmojiPacks.map(() => '') : data.hisEmojiPacks,
+    chats: data.chats ? data.chats.map(c => {
+      const needsStrip = (c.avatar && c.avatar.startsWith('data:'))
+        || (c.callBg && c.callBg.startsWith('data:'))
+        || (c.messages && c.messages.some(m => m.type === 'image' && m.src && m.src.startsWith('data:')));
+      if (!needsStrip) return c; // 无 base64 时零拷贝，直接复用
+      return {
+        ...c,
+        avatar: (c.avatar && c.avatar.startsWith('data:')) ? '' : c.avatar,
+        callBg: (c.callBg && c.callBg.startsWith('data:')) ? '' : c.callBg,
+        messages: c.messages ? c.messages.map(msg =>
+          (msg.type === 'image' && msg.src && msg.src.startsWith('data:'))
+            ? { ...msg, src: '' }
+            : msg
+        ) : c.messages
+      };
+    }) : data.chats
+  };
   return d;
 }
 
@@ -3708,31 +3754,50 @@ let toastTimer    = null;
 let notifTimer    = null;
 let notifChatId   = null;
 
+// 记录哪些视图已经初次渲染过，避免重复全量渲染
+const _viewRendered = {};
+
 window.addEventListener('load', function() {
   setTheme(appData.settings.theme || 'pink', false);
   
-  // 移动端：默认显示聊天列表
   const isMobile = window.innerWidth <= 768;
   if (isMobile) {
     switchView('chatList', null);
     renderMobileChatList();
-    renderContacts();
   }
   
+  // 初始化只渲染当前可见内容，不阻塞首屏
   renderChatList();
+  _viewRendered['chat'] = true;
+  _viewRendered['chatList'] = true;
   if (currentChatId) {
     renderMessages(currentChatId);
     updateChatHeader(currentChatId);
   }
-  renderContacts();
-  renderCards();
-  renderEmojis();
-  renderMailList();
-  renderMoments();
-  renderPlaylist();
   syncProfileUI();
   detectMobile();
-  scheduleIncomingCall(); // P6: 启动随机来电定时器
+  scheduleIncomingCall();
+
+  // 其余视图延迟到浏览器空闲时渲染
+  const idleRender = window.requestIdleCallback || (fn => setTimeout(fn, 200));
+  idleRender(() => {
+    renderContacts();
+    _viewRendered['contacts'] = true;
+    renderMailList();
+    _viewRendered['mailbox'] = true;
+  });
+  idleRender(() => {
+    renderMoments();
+    _viewRendered['moments'] = true;
+    renderCards();
+    _viewRendered['cards'] = true;
+  });
+  idleRender(() => {
+    renderEmojis();
+    _viewRendered['emoji'] = true;
+    renderPlaylist();
+    _viewRendered['music'] = true;
+  });
 
   // 异步加载 IndexedDB 完整数据（含头像等大图）
   loadDataAsync();
@@ -3772,71 +3837,90 @@ const VIEW_MAP = {
   entertainment:{left: 'leftChat',      main: 'viewEntertainment' },
 };
 
+// 缓存 DOM 节点，避免每次 switchView 都重新 querySelectorAll
+let _leftViews = null;
+let _mainViews = null;
+let _railItems = null;
+let _bottomItems = null;
+let _prevLeftId = null;
+let _prevMainId = null;
+
 function switchView(name, navEl) {
   const map = VIEW_MAP[name];
   if (!map) return;
+  const prevView = currentView;
   currentView = name;
 
-  // 切换左侧面板子视图
-  document.querySelectorAll('.left-view').forEach(el => el.classList.remove('active'));
-  const leftEl = document.getElementById(map.left);
-  if (leftEl) leftEl.classList.add('active');
+  // 懒初始化缓存
+  if (!_leftViews)   _leftViews   = Array.from(document.querySelectorAll('.left-view'));
+  if (!_mainViews)   _mainViews   = Array.from(document.querySelectorAll('.main-view'));
+  if (!_railItems)   _railItems   = Array.from(document.querySelectorAll('.nav-rail .nav-item'));
+  if (!_bottomItems) _bottomItems = Array.from(document.querySelectorAll('.bottom-nav-item'));
 
-  // 切换右侧主视图
-  document.querySelectorAll('.main-view').forEach(el => el.classList.remove('active'));
-  const mainEl = document.getElementById(map.main);
-  if (mainEl) mainEl.classList.add('active');
+  // 只切换有变化的元素，减少不必要的 classList 操作
+  if (_prevLeftId !== map.left) {
+    _leftViews.forEach(el => el.classList.remove('active'));
+    const leftEl = document.getElementById(map.left);
+    if (leftEl) leftEl.classList.add('active');
+    _prevLeftId = map.left;
+  }
+  if (_prevMainId !== map.main) {
+    _mainViews.forEach(el => el.classList.remove('active'));
+    const mainEl = document.getElementById(map.main);
+    if (mainEl) mainEl.classList.add('active');
+    _prevMainId = map.main;
+  }
 
-  // 更新 Rail 高亮（桌面）
-  document.querySelectorAll('.nav-rail .nav-item').forEach(el => el.classList.remove('active'));
-  // 更新底部导航高亮（移动端）
-  document.querySelectorAll('.bottom-nav-item').forEach(el => el.classList.remove('active'));
-
+  // Nav 高亮
+  _railItems.forEach(el => el.classList.remove('active'));
+  _bottomItems.forEach(el => el.classList.remove('active'));
   if (navEl) {
     navEl.classList.add('active');
   } else {
-    // 自动查找对应 nav item
-    const railItem = document.querySelector(`.nav-rail .nav-item[data-view="${name}"]`);
+    const railItem = _railItems.find(el => el.dataset.view === name);
     if (railItem) railItem.classList.add('active');
-    const bottomItem = document.querySelector(`.bottom-nav-item[data-view="${name}"]`);
+    const bottomItem = _bottomItems.find(el => el.dataset.view === name);
     if (bottomItem) bottomItem.classList.add('active');
   }
 
-  // 关闭 plus 面板
   closePlus();
-  // 关闭下拉菜单
   closeHeaderDropdown();
 
-  // 切换到表情包视图时，自动渲染"我的表情包"tab
+  // 懒渲染：切换到视图时按需渲染，避免重复全量渲染
   if (name === 'emoji') {
     document.querySelectorAll('#emojiViewTabs .panel-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
     document.getElementById('emojiTabMy').style.display  = 'flex';
     document.getElementById('emojiTabHis').style.display = 'none';
     document.getElementById('emojiTabLib').style.display = 'none';
     renderMyEmojiGrid();
+    _viewRendered['emoji'] = true;
   }
-
-  // 切换到背景美化视图时，更新朋友圈背景预览
   if (name === 'beauty') {
     updateMomentsBgPreview();
   }
-
-  // 切换到联系人视图时，重新渲染（确保移动端事件正常绑定）
   if (name === 'contacts') {
-    renderContacts();
+    requestAnimationFrame(() => { renderContacts(); _viewRendered['contacts'] = true; });
   }
-
-  // 切换到词卡视图时，重新渲染
   if (name === 'cards') {
     renderCards();
+    _viewRendered['cards'] = true;
   }
-
-  // 切换到状态库视图时，重新渲染
   if (name === 'statusLib') {
     renderStatusList();
+    _viewRendered['statusLib'] = true;
   }
-
-  // 切换到设置视图时，更新推送通知 UI 状态
+  if (name === 'moments') {
+    // 推到下一帧渲染，先让视图切换动画先跑
+    requestAnimationFrame(() => { renderMoments(); _viewRendered['moments'] = true; });
+  }
+  if (name === 'music' && !_viewRendered['music']) {
+    renderPlaylist();
+    _viewRendered['music'] = true;
+  }
+  if (name === 'mailbox' && !_viewRendered['mailbox']) {
+    renderMailList();
+    _viewRendered['mailbox'] = true;
+  }
   if (name === 'settings') {
     setTimeout(updatePushNotifUI, 50);
   }
@@ -4078,6 +4162,10 @@ function renderMobileChatList() {
 /* ════════════════════════════════════════════════════════════
    消息渲染
    ════════════════════════════════════════════════════════════ */
+// 每次渲染消息列表时，初始只渲染最近的消息条数；其余通过"加载更早消息"按需加载，
+// 避免聊天记录很长（尤其含大量图片）时，切换/打开聊天界面一次性创建大量 DOM/解码大量图片导致卡顿。
+const MESSAGES_PAGE_SIZE = 30;
+
 function renderMessages(chatId) {
   const area = document.getElementById('messagesArea');
   const chat  = getChatById(chatId);
@@ -4086,7 +4174,22 @@ function renderMessages(chatId) {
 
   area.innerHTML = '<div class="date-divider">今天</div>';
   if (!chat) return;
-  chat.messages.forEach((msg, i) => {
+
+  const total = chat.messages.length;
+  const startIdx = Math.max(0, total - MESSAGES_PAGE_SIZE);
+  area.dataset.renderStart = startIdx;
+
+  if (startIdx > 0) {
+    const moreBtn = document.createElement('div');
+    moreBtn.className = 'load-more-msgs';
+    moreBtn.textContent = '点击加载更早的消息';
+    moreBtn.style.cssText = 'text-align:center;padding:8px;margin:4px 0;font-size:12px;color:var(--text-sub);cursor:pointer;';
+    moreBtn.onclick = () => _loadEarlierMessages(chatId);
+    area.appendChild(moreBtn);
+  }
+
+  for (let i = startIdx; i < total; i++) {
+    const msg = chat.messages[i];
     // 时间戳：首条必显 + 间隔 > 5min（简化为每隔5条显示）
     if (i > 0 && i % 5 === 0) {
       const divider = document.createElement('div');
@@ -4095,27 +4198,58 @@ function renderMessages(chatId) {
       area.appendChild(divider);
     }
     appendBubble(msg, chat, false);
-  });
+  }
   scrollToBottom();
 }
 
-function appendBubble(msg, chat, animate = true) {
+/** 加载更早的一批历史消息，插入到当前已渲染内容之前，并保持滚动位置不跳动 */
+function _loadEarlierMessages(chatId) {
+  const area = document.getElementById('messagesArea');
+  const chat = getChatById(chatId);
+  if (!chat) return;
+  const startIdx = parseInt(area.dataset.renderStart || '0', 10);
+  if (startIdx <= 0) return;
+  const newStart = Math.max(0, startIdx - MESSAGES_PAGE_SIZE);
+  const moreBtn = area.querySelector('.load-more-msgs');
+  const anchor = moreBtn ? moreBtn.nextSibling : area.firstChild;
+
+  const frag = document.createDocumentFragment();
+  for (let i = newStart; i < startIdx; i++) {
+    const msg = chat.messages[i];
+    if (i > 0 && i % 5 === 0) {
+      const divider = document.createElement('div');
+      divider.className = 'date-divider';
+      divider.textContent = msg.time;
+      frag.appendChild(divider);
+    }
+    frag.appendChild(appendBubble(msg, chat, false, false));
+  }
+
+  const prevScrollHeight = area.scrollHeight;
+  area.insertBefore(frag, anchor);
+  area.dataset.renderStart = newStart;
+  if (newStart === 0 && moreBtn) moreBtn.remove();
+  // 保持视觉位置不变（新内容插入到顶部，滚动条相应下移）
+  area.scrollTop += (area.scrollHeight - prevScrollHeight);
+}
+
+function appendBubble(msg, chat, animate = true, append = true) {
   const area = document.getElementById('messagesArea');
   const row  = document.createElement('div');
 
   if (msg.type === 'pat') {
     row.className = 'msg-row pat';
     row.innerHTML = `<div class="bubble pat-bubble">${escHtml(msg.text)}</div>`;
-    area.appendChild(row);
+    if (append) area.appendChild(row);
     if (animate) scrollToBottom();
-    return;
+    return row;
   }
   if (msg.from === 'system') {
     row.className = 'msg-row system';
     row.innerHTML = `<div class="bubble system-bubble">📞 ${escHtml(msg.text)}</div>`;
-    area.appendChild(row);
+    if (append) area.appendChild(row);
     if (animate) scrollToBottom();
-    return;
+    return row;
   }
 
   const isSelf = msg.from === 'self';
@@ -4125,13 +4259,13 @@ function appendBubble(msg, chat, animate = true) {
   const userAv = appData.userProfile?.avatar || appData.userAvatar || '';
   const userNick = appData.userProfile?.nickname || '我';
   const selfAv = userAv
-    ? `<div class="msg-av" style="background:var(--primary-gradient);flex-shrink:0;"><img src="${userAv}" alt=""></div>`
+    ? `<div class="msg-av" style="background:var(--primary-gradient);flex-shrink:0;"><img src="${userAv}" alt="" loading="lazy" decoding="async"></div>`
     : `<div class="msg-av" style="background:var(--primary-gradient);flex-shrink:0;">${escHtml(userNick.charAt(0))}</div>`;
 
   const av = isSelf
     ? selfAv
     : `<div class="msg-av" onclick="openNudge()" style="background:${chat ? avatarGradient(chat) : 'var(--primary-gradient)'};">
-         ${chat?.avatar ? `<img src="${chat.avatar}" alt="">` : escHtml(chat?.emoji || '?')}
+         ${chat?.avatar ? `<img src="${chat.avatar}" alt="" loading="lazy" decoding="async">` : escHtml(chat?.emoji || '?')}
        </div>`;
 
   // 气泡内容
@@ -4145,7 +4279,7 @@ function appendBubble(msg, chat, animate = true) {
     quoteHtml = `<div class="reply-quote">↩ ${quotedText}</div>`;
   }
   if (msg.type === 'image') {
-    bubbleHtml = `<div class="bubble img-bubble">${quoteHtml}<img src="${msg.src || ''}" alt="图片" onclick="window.open(this.src)"></div>`;
+    bubbleHtml = `<div class="bubble img-bubble">${quoteHtml}<img src="${msg.src || ''}" alt="图片" loading="lazy" decoding="async" onclick="window.open(this.src)"></div>`;
   } else if (msg.type === 'video') {
     bubbleHtml = `<div class="bubble">${quoteHtml}🎬 ${escHtml(msg.filename || '视频')}</div>`;
   } else if (msg.type === 'voice') {
@@ -4174,8 +4308,9 @@ function appendBubble(msg, chat, animate = true) {
       </div>
     </div>
   `;
-  area.appendChild(row);
+  if (append) area.appendChild(row);
   if (animate) scrollToBottom();
+  return row;
 }
 
 function scrollToBottom() {
@@ -4220,6 +4355,40 @@ function sendMessage() {
    ════════════════════════════════════════════════════════════ */
 
 /**
+ * 仅更新单条消息的已读标记 DOM，避免全量重建消息列表
+ * 当消息 DOM 还不存在时（极少数情况）才回退到 renderMessages
+ */
+function updateReadMark(chatId, msgId) {
+  if (currentChatId !== chatId) return;
+  const chat = getChatById(chatId);
+  if (!chat) return;
+  const msg = chat.messages.find(m => m.id === msgId);
+  if (!msg) return;
+
+  // 找到对应气泡行：所有 msg-row.self 按顺序与「已渲染范围内」chat.messages 里 from=self 对应
+  const area = document.getElementById('messagesArea');
+  const renderStart = parseInt(area.dataset.renderStart || '0', 10);
+  const selfRows = area.querySelectorAll('.msg-row.self');
+  const selfMsgs = chat.messages.slice(renderStart).filter(m => m.from === 'self');
+  const idx = selfMsgs.findIndex(m => m.id === msgId);
+  if (idx < 0 || idx >= selfRows.length) {
+    // 回退：全量刷新
+    renderMessages(chatId);
+    return;
+  }
+  const row = selfRows[idx];
+  let readSpan = row.querySelector('.msg-read');
+  if (!readSpan) return;
+  if (msg.ghosted) {
+    readSpan.textContent = '已读不回';
+    readSpan.classList.add('ghosted');
+  } else if (msg.read) {
+    readSpan.textContent = '已读';
+    readSpan.classList.remove('ghosted');
+  }
+}
+
+/**
  * triggerAutoReply — 完整 P3 实现
  * 支持：延迟计算、已读时序、多条回复、字卡抽取、
  *        emoji混合模式、hisEmojiPacks图片、3%绘画替换
@@ -4237,7 +4406,7 @@ function triggerAutoReply(chat, triggeredMsgId) {
       if (t) {
         t.read = true;
         saveData();
-        if (currentChatId === chat.id) renderMessages(chat.id);
+        updateReadMark(chat.id, triggeredMsgId);
       }
     }, readDelay);
     // 再过 2~5 秒后变为"已读不回"
@@ -4248,7 +4417,7 @@ function triggerAutoReply(chat, triggeredMsgId) {
         t.read = true;
         t.ghosted = true;
         saveData();
-        if (currentChatId === chat.id) renderMessages(chat.id);
+        updateReadMark(chat.id, triggeredMsgId);
       }
     }, ghostDelay);
     return;
@@ -4273,7 +4442,7 @@ function triggerAutoReply(chat, triggeredMsgId) {
     if (t) {
       t.read = true;
       saveData();
-      if (currentChatId === chat.id) renderMessages(chat.id); // 立即刷新，让用户看到"已读"
+      updateReadMark(chat.id, triggeredMsgId);
     }
   }, readDelay);
 
@@ -6913,6 +7082,7 @@ function importData(input) {
 }
 function clearData() {
   if (!confirm('确认清除全部本地数据？此操作不可恢复。')) return;
+  if (_saveDataTimer) { clearTimeout(_saveDataTimer); _saveDataTimer = null; }
   _idbSet(DATA_KEY, null).catch(() => {});
   localStorage.removeItem(DATA_KEY);
   location.reload();
@@ -7299,13 +7469,55 @@ function openPatManage() {
     const disabled = appData.disabledPatIndices.includes(idx);
     const item = document.createElement('div');
     item.className = 'pat-manage-item';
-    item.innerHTML = `
-      <span class="pat-manage-text${disabled ? ' disabled-pat' : ''}">${escHtml(text)}</span>
-      <div style="display:flex;gap:6px;flex-shrink:0;">
-        <button class="btn cancel" style="padding:3px 8px;font-size:11px;" onclick="togglePatDisable(${idx})">${disabled ? '启用' : '禁用'}</button>
-        <button class="btn danger" style="padding:3px 8px;font-size:11px;" onclick="deletePatItem(${idx})">删除</button>
-      </div>
+
+    // 文案 span（可内联编辑）
+    const span = document.createElement('span');
+    span.className = 'pat-manage-text' + (disabled ? ' disabled-pat' : '');
+    span.title = '点击编辑';
+    span.textContent = text;
+
+    span.addEventListener('click', () => {
+      if (span.contentEditable === 'true') return;
+      span.contentEditable = 'true';
+      span.focus();
+      // 光标移到末尾
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+
+    span.addEventListener('blur', () => {
+      span.contentEditable = 'false';
+      const newText = span.textContent.trim();
+      if (newText && newText !== appData.patMessages[idx]) {
+        appData.patMessages[idx] = newText;
+        saveData();
+        showToast('已保存');
+      } else if (!newText) {
+        span.textContent = appData.patMessages[idx]; // 还原
+      }
+    });
+
+    span.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); span.blur(); }
+      if (e.key === 'Escape') {
+        span.textContent = appData.patMessages[idx];
+        span.contentEditable = 'false';
+      }
+    });
+
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
+    btns.innerHTML = `
+      <button class="btn cancel" style="padding:3px 8px;font-size:11px;" onclick="togglePatDisable(${idx})">${disabled ? '启用' : '禁用'}</button>
+      <button class="btn danger"  style="padding:3px 8px;font-size:11px;" onclick="deletePatItem(${idx})">删除</button>
     `;
+
+    item.appendChild(span);
+    item.appendChild(btns);
     list.appendChild(item);
   });
   openModal('patManage');
@@ -8846,7 +9058,8 @@ function _refreshStatusUI() {
 // Page Visibility API — 后台时暂停非关键定时器
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // 页面进入后台，不需要额外清理（定时器继续但不刷新UI）
+    // 页面进入后台前，确保待写入的数据立即落盘
+    saveDataNow();
     return;
   }
   // 页面回到前台，刷新可见视图
@@ -8860,6 +9073,7 @@ document.addEventListener('visibilitychange', () => {
 
 // 页面卸载前清理
 window.addEventListener('beforeunload', () => {
+  saveDataNow();
   [_autoMailTimer, _musicBubbleTimer, _signatureTimer, _statusRefreshTimer, _statusNoonTimer,
    _autoMsgTimer, _autoMomentTimer, scheduleCallTimer, progressTimer]
     .forEach(t => { if (t) clearTimeout(t); });
@@ -8995,10 +9209,16 @@ let _swChannel = null;
 
 async function initServiceWorker() {
   if (!('serviceWorker' in navigator)) return false;
+  // Blob URL 注册 SW 在 file:// 协议下不被支持
+  if (location.protocol === 'file:') {
+    console.warn('[PushNotif] file:// 协议不支持 Service Worker，请将文件放到 HTTP(S) 服务器上访问');
+    return false;
+  }
   try {
     const blob = new Blob([SW_SCRIPT], { type: 'application/javascript' });
     const swUrl = URL.createObjectURL(blob);
-    _swRegistration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
+    // scope 必须用 './' 而非 '/'，否则 Blob URL origin 与页面 origin 不匹配会报错
+    _swRegistration = await navigator.serviceWorker.register(swUrl, { scope: './' });
     // BroadcastChannel：SW 触发的通知发回页面
     _swChannel = new BroadcastChannel('multichat_sw');
     _swChannel.onmessage = e => {
@@ -9089,7 +9309,11 @@ async function togglePushNotification() {
     // 初始化 SW
     const ok = await initServiceWorker();
     if (!ok) {
-      showToast('⚠️ Service Worker 初始化失败，推送不可用');
+      if (location.protocol === 'file:') {
+        showToast('⚠️ 本地文件模式不支持后台推送，请用浏览器打开 HTTP 服务器上的地址');
+      } else {
+        showToast('⚠️ Service Worker 初始化失败，请确认浏览器允许通知权限，或尝试刷新页面');
+      }
       updatePushNotifUI();
       return;
     }
