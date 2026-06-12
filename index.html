@@ -3309,11 +3309,9 @@ body {
       </div>
     </div>
     <div class="modal-footer">
+      <button class="btn cancel" style="margin-right:auto;" onclick="resetPatMessages()">恢复默认</button>
       <button class="btn cancel" onclick="closeModal()">关闭</button>
     </div>
-  </div>
-
-  <!-- Emoji 库添加 -->
   <div class="modal-box" id="modal-addEmojiLib" style="display:none;">
     <div class="modal-header">
       <span class="modal-title">添加 Emoji 到角色库</span>
@@ -3535,7 +3533,12 @@ function loadData() {
     const raw = localStorage.getItem(DATA_KEY);
     if (!raw) return JSON.parse(JSON.stringify(DEFAULT_DATA));
     const saved = JSON.parse(raw);
-    return deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+    const result = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+    // ★ 拍一拍文案兜底：若加载后 patMessages 为空，恢复默认 17 条
+    if (!Array.isArray(result.patMessages) || result.patMessages.length === 0) {
+      result.patMessages = JSON.parse(JSON.stringify(DEFAULT_DATA.patMessages));
+    }
+    return result;
   } catch (e) {
     console.warn('[MultiChat] loadData error, using defaults:', e);
     return JSON.parse(JSON.stringify(DEFAULT_DATA));
@@ -3578,6 +3581,10 @@ async function loadDataAsync() {
         // 内存里的值等于默认值，或是被 _slimData 清空的表情包占位数组，用 IDB 完整值替代
         appData[k] = idbBase[k];
       }
+    }
+    // ★ 拍一拍文案兜底：若合并后 patMessages 为空数组，恢复默认的 17 条文案
+    if (!Array.isArray(appData.patMessages) || appData.patMessages.length === 0) {
+      appData.patMessages = JSON.parse(JSON.stringify(DEFAULT_DATA.patMessages));
     }
     // ★★★ 头像修复：localStorage 精简版（_slimData）会将 chats[].avatar 清空为 ''，
     // 导致 deepMerge(idbBase, appData) 时内存中的空字符串覆盖 IDB 中保存的完整 base64 头像。
@@ -7565,6 +7572,15 @@ function addPatItem() {
   saveData();
   openPatManage();
   showToast('已添加');
+}
+
+function resetPatMessages() {
+  if (!confirm('确定要恢复默认的 17 条拍一拍文案吗？当前文案将被覆盖。')) return;
+  appData.patMessages = JSON.parse(JSON.stringify(DEFAULT_DATA.patMessages));
+  appData.disabledPatIndices = [];
+  saveData();
+  openPatManage();
+  showToast('已恢复默认文案');
 }
 
 function insertPatPlaceholder(ph) {
