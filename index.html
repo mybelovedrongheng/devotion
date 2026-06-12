@@ -2319,6 +2319,13 @@ body {
           <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
         </div>
 
+        <div class="settings-section-title" style="margin-top:8px;">聊天工具</div>
+        <div class="settings-item" onclick="openPatManage()">
+          <div class="settings-icon" style="background:#fff3e0;color:#fb8c00;"><i class="fa-solid fa-hand-pointer"></i></div>
+          <div><div class="settings-label">拍一拍文案</div><div class="settings-desc">管理拍一拍互动文案库</div></div>
+          <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
+        </div>
+
         <div class="settings-section-title" style="margin-top:8px;">数据备份</div>
         <div class="settings-item" onclick="exportFullBackup()">
           <div class="settings-icon" style="background:#e3f2fd;color:#1976d2;"><i class="fa-solid fa-database"></i></div>
@@ -2394,11 +2401,6 @@ body {
           <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
         </div>
         <div class="settings-section-title" style="margin-top:8px;">聊天工具</div>
-        <div class="settings-item" onclick="openPatManage()">
-          <div class="settings-icon" style="background:#fff3e0;color:#fb8c00;"><i class="fa-solid fa-hand-pointer"></i></div>
-          <div><div class="settings-label">拍一拍文案</div><div class="settings-desc">管理拍一拍互动文案库</div></div>
-          <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
-        </div>
         <div class="settings-item" onclick="openPaintModal()">
           <div class="settings-icon" style="background:#f3e5f5;color:#8e24aa;"><i class="fa-solid fa-paintbrush"></i></div>
           <div><div class="settings-label">绘画板</div><div class="settings-desc">手绘或自动生成图案发送</div></div>
@@ -5640,100 +5642,112 @@ function postMomentFull() {
 }
 
 /**
- * 对一条动态，为每个角色独立安排：
+ * 对一条动态，为每个角色独立安排「已看→点赞→评论」的目标时间戳（写入 m._interactions 并持久化）。
  *  · 看到时间：发布后 0 ~ 24小时内随机
- *  · 看到后 75% 概率点赞（独立）
- *  · 看到后 75% 概率评论（独立，与点赞无关）
+ *  · 看到后 75% 概率点赞（独立），点赞时间 = 看到时间 + 3s~1min
+ *  · 看到后 75% 概率评论（独立，与点赞无关），评论时间 = 看到时间 + 10s~2min
+ *
+ * ★ 关键：这里不再用 setTimeout 延迟执行互动逻辑（关闭/刷新页面会丢失），
+ * 而是把"将来要发生的时间点"存进数据并立即 saveData()。
+ * 真正的互动判定由 _processMomentInteractions() 完成 ——
+ * 它在页面打开时（含重新打开）以及之后每隔一段时间都会检查一次，
+ * 把所有"已经到期但还没处理"的互动一次性补发出来，
+ * 因此即使关闭网页很久再打开，到期的点赞/评论依然会按原计划触发。
  */
 function _scheduleMomentViewers(m) {
   const H24 = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  if (!m._interactions) m._interactions = [];
   appData.chats.forEach(c => {
-    // 每个角色随机 0 ~ 24h 后看到
-    const seeDelay = Math.random() * H24;
-    setTimeout(() => {
-      // 动态可能已被删除
-      const live = appData.moments.find(x => x.id === m.id);
-      if (!live) return;
-
-      // ── 标记已看 ──
-      if (!live.seenBy) live.seenBy = [];
-      if (!live.seenBy.includes(c.id)) {
-        live.seenBy.push(c.id);
-        saveData();
-        _updateSeenAreaDOM(live);
-      }
-
-      // ── 75% 概率点赞（独立） ──
-      if (Math.random() < 0.75) {
-        const likeDelay = 3000 + Math.random() * 57000; // 3s ~ 1min 后点赞
-        setTimeout(() => {
-          const lv = appData.moments.find(x => x.id === m.id);
-          if (!lv) return;
-          if (!lv.likedBy) lv.likedBy = [];
-          if (lv.likedBy.includes(c.id)) return;
-          lv.likedBy.push(c.id);
-          lv.likes = (lv.likes || 0) + 1;
-          saveData();
-          appData.momentNotifications.push({ id: Date.now(), type: 'like', momentId: lv.id, chatId: c.id, text: `${c.name} 赞了你的动态`, time: getTime(), read: false });
-          updateMomentBadge();
-          // 局部更新点赞数
-          const ti = document.querySelector(`.moment-item[data-moment-id="${lv.id}"]`);
-          if (ti) {
-            const likeBtn = ti.querySelector(`.moment-action[data-action="like"]`);
-            if (likeBtn) likeBtn.innerHTML = `<i class="fa-${lv.liked ? 'solid' : 'regular'} fa-heart"></i> ${lv.likes}`;
-          }
-        }, likeDelay);
-      }
-
-      // ── 75% 概率评论（独立，与点赞无关） ──
-      if (Math.random() < 0.75) {
-        const cmtDelay = 10000 + Math.random() * 110000; // 10s ~ 2min 后评论
-        setTimeout(() => {
-          const lv = appData.moments.find(x => x.id === m.id);
-          if (!lv) return;
-          const pool = _buildCommentPool(lv.id);
-          if (pool.length === 0) return;
-          const resp = pool[Math.floor(Math.random() * pool.length)];
-          if (!lv.comments) lv.comments = [];
-          lv.comments.push({ from: 'other', chatId: c.id, text: resp });
-          appData.momentNotifications.push({ id: Date.now(), type: 'comment', momentId: lv.id, chatId: c.id, text: resp, time: getTime(), read: false });
-          saveData();
-          updateMomentBadge();
-          // 局部追加评论
-          const ti = document.querySelector(`.moment-item[data-moment-id="${lv.id}"]`);
-          if (ti) {
-            let mc = ti.querySelector(`#mc-${lv.id}`);
-            if (!mc) { mc = document.createElement('div'); mc.id = 'mc-' + lv.id; mc.className = 'moment-comments'; ti.appendChild(mc); }
-            const d = document.createElement('div');
-            d.className = 'moment-comment';
-            d.innerHTML = `<strong>${escHtml(c.name)}</strong>：${escHtml(resp)}`;
-            mc.appendChild(d);
-            const cmtBtn = ti.querySelector(`.moment-action[data-action="comment"]`);
-            if (cmtBtn) cmtBtn.innerHTML = `<i class="fa-regular fa-comment"></i> ${lv.comments.length}`;
-          }
-        }, cmtDelay);
-      }
-
-    }, seeDelay);
+    const seeAt = now + Math.random() * H24; // 0~24h 后看到
+    const entry = { chatId: c.id, seeAt };
+    if (Math.random() < 0.75) entry.likeAt    = seeAt + 3000  + Math.random() * 57000;  // 看到后 3s~1min
+    if (Math.random() < 0.75) entry.commentAt = seeAt + 10000 + Math.random() * 110000; // 看到后 10s~2min
+    m._interactions.push(entry);
   });
+  saveData();
+  _scheduleInteractionCheck(); // 立即安排一次轮询，确保最近的一条尽快被检查到
 }
 
-/** 局部更新已看头像列表 DOM */
-function _updateSeenAreaDOM(m) {
-  const ti = document.querySelector(`.moment-item[data-moment-id="${m.id}"]`);
-  if (!ti) return;
-  const seenArea = ti.querySelector('.moment-seen-area');
-  if (!seenArea) return;
-  const seenBy = m.seenBy || [];
-  seenArea.innerHTML = seenBy.length > 0 ? `
-    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;">
-      <span style="font-size:10px;color:var(--text-hint);">已看：</span>
-      ${seenBy.slice(0, 5).map(cid => {
-        const sc = appData.chats.find(x => x.id === cid);
-        return sc ? `<div style="width:18px;height:18px;border-radius:50%;background:${avatarGradient(sc)};color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;">${sc.emoji || sc.name.charAt(0)}</div>` : '';
-      }).join('')}
-      ${seenBy.length > 5 ? `<span style="font-size:10px;color:var(--text-hint);">+${seenBy.length - 5}</span>` : ''}
-    </div>` : '';
+/**
+ * 检查所有动态的 _interactions，把已到期的「已看 / 点赞 / 评论」一次性执行掉。
+ * 即使期间网页一直处于关闭状态，重新打开后第一次调用本函数也会把所有
+ * 已过期的互动全部补发（保持原本随机的时间点，只是执行被推迟到了"现在"）。
+ */
+function _processMomentInteractions() {
+  const now = Date.now();
+  let dataChanged   = false;
+  let needRerender  = false;
+
+  (appData.moments || []).forEach(m => {
+    if (!m._interactions || m._interactions.length === 0) return;
+
+    m._interactions = m._interactions.filter(entry => {
+      const c = appData.chats.find(x => x.id === entry.chatId);
+      if (!c) return false; // 角色已被删除，丢弃该条待办
+
+      // ── 标记已看 ──
+      if (entry.seeAt && now >= entry.seeAt) {
+        if (!m.seenBy) m.seenBy = [];
+        if (!m.seenBy.includes(c.id)) {
+          m.seenBy.push(c.id);
+          dataChanged = true;
+          needRerender = true;
+        }
+        entry.seeAt = null;
+      }
+
+      // ── 点赞 ──
+      if (entry.likeAt && now >= entry.likeAt) {
+        if (!m.likedBy) m.likedBy = [];
+        if (!m.likedBy.includes(c.id)) {
+          m.likedBy.push(c.id);
+          m.likes = (m.likes || 0) + 1;
+          appData.momentNotifications.push({ id: Date.now() + Math.random(), type: 'like', momentId: m.id, chatId: c.id, text: `${c.name} 赞了你的动态`, time: getTime(), read: false });
+          dataChanged = true;
+          needRerender = true;
+        }
+        entry.likeAt = null;
+      }
+
+      // ── 评论 ──
+      if (entry.commentAt && now >= entry.commentAt) {
+        const pool = _buildCommentPool(m.id);
+        if (pool.length > 0) {
+          const resp = pool[Math.floor(Math.random() * pool.length)];
+          if (!m.comments) m.comments = [];
+          m.comments.push({ from: 'other', chatId: c.id, text: resp });
+          appData.momentNotifications.push({ id: Date.now() + Math.random(), type: 'comment', momentId: m.id, chatId: c.id, text: resp, time: getTime(), read: false });
+          dataChanged = true;
+          needRerender = true;
+        }
+        entry.commentAt = null;
+      }
+
+      // 三件事都处理完才移除该待办项
+      return entry.seeAt || entry.likeAt || entry.commentAt;
+    });
+  });
+
+  if (dataChanged) {
+    saveData();
+    updateMomentBadge();
+    if (needRerender) {
+      const list = document.getElementById('momentsList');
+      if (list) renderMoments();
+    }
+  }
+}
+
+/**
+ * 轮询调度器：每 30 秒检查一次是否有到期的朋友圈互动。
+ * 页面加载时立即执行一次（补发关闭期间错过的互动），之后持续轮询。
+ */
+let _momentInteractionTimer = null;
+function _scheduleInteractionCheck() {
+  if (_momentInteractionTimer) return; // 已在运行
+  _processMomentInteractions();
+  _momentInteractionTimer = setInterval(_processMomentInteractions, 30 * 1000);
 }
 
 /** 构建评论候选池（用朋友圈文本或 wordCards 兜底） */
@@ -8945,6 +8959,7 @@ function initAllTimers() {
   scheduleSignature();       // P9: 签名轮换
   scheduleStatusRefresh();   // P1: 状态刷新
   scheduleCharPaintTimers(); // P3: 每10分钟1%概率发送绘画
+  _scheduleInteractionCheck(); // P7: 朋友圈互动轮询（含补发离线期间到期的点赞/评论）
 }
 
 /** 从状态库中随机选取一条状态（支持分组权重） */
