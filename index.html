@@ -4291,6 +4291,10 @@ function switchView(name, navEl) {
     renderMailList();
     _viewRendered['mailbox'] = true;
   }
+  if (name === 'momentNotif') {
+    renderMomentNotif();
+    _viewRendered['momentNotif'] = true;
+  }
   if (name === 'settings') {
     setTimeout(updatePushNotifUI, 50);
   }
@@ -5678,16 +5682,22 @@ function renderMoments() {
     // 评论折叠：>3条折叠
     const comments = m.comments || [];
     const showCount = 3;
+    const _cmtName = (c) => {
+      if (c.from === 'self') return escHtml(p.nickname);
+      // 角色评论：用该评论实际所属角色（c.chatId），而非动态作者名
+      const cc = c.chatId != null ? appData.chats.find(x => x.id === c.chatId) : null;
+      return escHtml(cc ? cc.name : authorName);
+    };
     const commentHtml = comments.length > 0 ? `
       <div class="moment-comments" id="mc-${m.id}">
         ${comments.slice(0, showCount).map(c => {
-          const cname = c.from === 'self' ? escHtml(p.nickname) : escHtml(authorName);
+          const cname = _cmtName(c);
           return `<div class="moment-comment"><strong>${cname}</strong>：${escHtml(c.text)}</div>`;
         }).join('')}
         ${comments.length > showCount ? `
           <div id="mce-${m.id}" style="display:none;">
             ${comments.slice(showCount).map(c => {
-              const cname = c.from === 'self' ? escHtml(p.nickname) : escHtml(authorName);
+              const cname = _cmtName(c);
               return `<div class="moment-comment"><strong>${cname}</strong>：${escHtml(c.text)}</div>`;
             }).join('')}
           </div>
@@ -6276,7 +6286,12 @@ function renderOtherMoment(chatId) {
     const comments = m.comments || [];
     const p = appData.userProfile;
     const commentBlockHtml = comments.length > 0 ? `<div class="moment-comments" id="mc-${m.id}">${comments.slice(0,3).map(c => {
-      const cname = c.from === 'self' ? escHtml(p.nickname) : escHtml(chat.name);
+      let cname;
+      if (c.from === 'self') cname = escHtml(p.nickname);
+      else {
+        const cc = c.chatId != null ? appData.chats.find(x => x.id === c.chatId) : null;
+        cname = escHtml(cc ? cc.name : chat.name);
+      }
       return `<div class="moment-comment"><strong>${cname}</strong>：${escHtml(c.text)}</div>`;
     }).join('')}${comments.length > 3 ? `<div class="moment-comment" style="color:var(--primary-deep);cursor:pointer;" onclick="expandComments(${m.id})">展开全部 ${comments.length} 条评论</div>` : ''}</div>` : '';
     item.innerHTML = `
@@ -9821,6 +9836,20 @@ function _scheduleNoonStatusCheck() {
     }
     _scheduleNoonStatusCheck(); // 设置明天 12 点的定时器
   }, delay);
+}
+
+/**
+ * 调试用：立即让所有角色的在线状态过期并刷新（在浏览器控制台调用 __forceRefreshStatus() 即可）。
+ * 用于验证状态刷新系统是否正常工作，无需等待最长 5 小时的自然到期。
+ */
+function __forceRefreshStatus() {
+  appData.chats.forEach(chat => {
+    chat._statusText   = _pickRandomStatus() || '在线';
+    chat._statusExpiry = Date.now() - 1; // 立即到期
+  });
+  saveData();
+  _refreshStatusUI();
+  console.log('[MultiChat] 已强制刷新所有角色状态');
 }
 
 /** 刷新当前可见的状态 UI */
