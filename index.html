@@ -3832,13 +3832,40 @@ function _openIDB() {
         db.createObjectStore(IDB_STORE);
       }
     };
-    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onsuccess = e => {
+      _idb = e.target.result;
+      // 浏览器可能在空闲/休眠/存储压力等情况下主动关闭连接，
+      // 或在另一个标签页升级数据库版本时触发 versionchange。
+      // 此时需要清空缓存，下次 _openIDB() 会重新建立连接，
+      // 否则后续所有事务都会因连接已关闭而抛出 InvalidStateError。
+      _idb.onclose = () => { _idb = null; };
+      _idb.onversionchange = () => {
+        try { _idb.close(); } catch (_) {}
+        _idb = null;
+      };
+      resolve(_idb);
+    };
     req.onerror   = e => reject(e.target.error);
   });
 }
 
+/** 若连接已关闭（InvalidStateError），重置缓存并重试一次 */
+function _idbWithRetry(fn) {
+  return _openIDB().then(db => {
+    try {
+      return fn(db);
+    } catch (e) {
+      if (e && e.name === 'InvalidStateError') {
+        _idb = null;
+        return _openIDB().then(fn);
+      }
+      throw e;
+    }
+  });
+}
+
 function _idbGet(key) {
-  return _openIDB().then(db => new Promise((resolve, reject) => {
+  return _idbWithRetry(db => new Promise((resolve, reject) => {
     const tx  = db.transaction(IDB_STORE, 'readonly');
     const req = tx.objectStore(IDB_STORE).get(key);
     req.onsuccess = () => resolve(req.result);
@@ -3847,7 +3874,7 @@ function _idbGet(key) {
 }
 
 function _idbSet(key, value) {
-  return _openIDB().then(db => new Promise((resolve, reject) => {
+  return _idbWithRetry(db => new Promise((resolve, reject) => {
     const tx  = db.transaction(IDB_STORE, 'readwrite');
     const req = tx.objectStore(IDB_STORE).put(value, key);
     req.onsuccess = () => resolve();
@@ -4119,7 +4146,7 @@ window.addEventListener('load', function() {
   }
   syncProfileUI();
   detectMobile();
-  scheduleIncomingCall();
+  initAllTimers();
 
   // 其余视图延迟到浏览器空闲时渲染
   const idleRender = window.requestIdleCallback || (fn => setTimeout(fn, 200));
@@ -7252,7 +7279,11 @@ function formatCallTime(s) {
 /* ── 随机来电系统 ── */
 function scheduleIncomingCall() {
   clearTimeout(scheduleCallTimer);
-  if (!appData.chats || appData.chats.length === 0) return;
+  if (!appData.chats || appData.chats.length === 0) {
+    // 暂无联系人，5分钟后重新检查，而不是永久停止调度
+    scheduleCallTimer = setTimeout(scheduleIncomingCall, 5 * 60 * 1000);
+    return;
+  }
   // 15~60 分钟随机间隔
   const delay = (15 + Math.random() * 45) * 60 * 1000;
   scheduleCallTimer = setTimeout(() => {
