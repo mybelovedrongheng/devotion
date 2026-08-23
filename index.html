@@ -4340,10 +4340,15 @@ function _idbSet(key, value) {
  * 注意：IndexedDB 是异步的，所以这里用同步 localStorage 做初始化，
  * 然后异步迁移/同步到 IndexedDB
  */
+let _localStorageHadData = false; // ★ 标记本次页面加载时 localStorage 是否有数据；
+                                    // 若为 false（比如上次因超限被清空），loadDataAsync
+                                    // 必须以 IndexedDB 数据为准，不能再做"合并"，否则会用
+                                    // 空的默认值把 IndexedDB 里明明保存好的数据覆盖掉。
 function loadData() {
   try {
     const raw = localStorage.getItem(DATA_KEY);
-    if (!raw) { _diagPush('ℹ️ loadData: localStorage中没有找到 ' + DATA_KEY + '，使用默认数据'); return JSON.parse(JSON.stringify(DEFAULT_DATA)); }
+    if (!raw) { _diagPush('ℹ️ loadData: localStorage中没有找到 ' + DATA_KEY + '，使用默认数据（将等待IndexedDB异步加载真实数据）'); _localStorageHadData = false; return JSON.parse(JSON.stringify(DEFAULT_DATA)); }
+    _localStorageHadData = true;
     _diagPush('ℹ️ loadData: 从localStorage读到 ' + raw.length + ' 字符的已保存数据');
     const saved = JSON.parse(raw);
     const result = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
@@ -4382,6 +4387,37 @@ async function loadDataAsync() {
     // 将 IDB 完整数据（含图片）作为基础，再把内存里的当前 appData 覆盖上去，
     // 保留用户在 IDB 加载完成前做的所有改动
     const idbBase = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
+
+    // ★★★ 关键修复（2026-08）：如果本次页面加载时 localStorage 里根本没有数据
+    // （最典型的原因：上次保存时 localStorage 容量超限，导致数据被清空，但
+    // IndexedDB 依然保存成功），那么此刻内存里的 appData 只是纯默认值，
+    // 不包含任何"用户加载后又做的修改"，没有任何值得保留的东西。
+    // 这种情况下绝不能再走下面那套"逐字段合并"的逻辑——它是按数组类型
+    // 整体替换的，一旦 appData 恰好等于默认值，会把 idbBase 里的真实数据
+    // （聊天记录等）成字段地覆盖回空数组，造成"刷新后数据全部消失"的假象。
+    // 直接以 IndexedDB 数据（已经是完整、正确的数据）为准即可。
+    if (!_localStorageHadData) {
+      _diagPush('ℹ️ localStorage此次为空，直接采用IndexedDB中的完整数据（不做字段合并）');
+      appData = idbBase;
+      _idbReady = true;
+      // 把完整数据同步补写回 localStorage 精简版，避免下次刷新又要等 IDB
+      try { localStorage.setItem(DATA_KEY, JSON.stringify(_slimData(appData))); } catch (_) {}
+      setTheme(appData.settings.theme || 'pink', false);
+      setBubbleStyle(appData.settings.bubbleStyle || 'default', false);
+      currentChatId = appData.settings.currentChatId || appData.chats[0]?.id || 1;
+      renderChatList();
+      renderMessages(currentChatId);
+      updateChatHeader(currentChatId);
+      renderContacts();
+      renderMoments();
+      renderMailList();
+      syncProfileUI();
+      renderMyEmojiGrid();
+      renderHisEmojiGrid();
+      renderCards();
+      _diagPush('✅ loadDataAsync 完成（IndexedDB直接采用模式）');
+      return;
+    }
     // ★★ 关键修复：对用户自定义数组（statusCards / myEmojiPacks / hisEmojiPacks 等），
     // 若内存 appData 里该数组与 DEFAULT_DATA 完全相同（说明 localStorage 超限丢失，内存只有默认值），
     // 则优先保留 IDB 里的用户数据，避免用默认值覆盖用户数据。
@@ -4432,10 +4468,17 @@ async function loadDataAsync() {
         return merged;
       });
     }
-    // 恢复用户头像（userProfile.avatar 由 _slimData 保留，但以防万一也检查一下）
+    // 恢复用户头像/背景图（这些字段现在会被 _slimData 剥离出 localStorage，需要从 IDB 回填）
     if (!appData.userProfile?.avatar && idbBase.userProfile?.avatar) {
       if (!appData.userProfile) appData.userProfile = {};
       appData.userProfile.avatar = idbBase.userProfile.avatar;
+    }
+    if (!appData.userProfile?.bgImage && idbBase.userProfile?.bgImage) {
+      if (!appData.userProfile) appData.userProfile = {};
+      appData.userProfile.bgImage = idbBase.userProfile.bgImage;
+    }
+    if (!appData.userAvatar && idbBase.userAvatar) {
+      appData.userAvatar = idbBase.userAvatar;
     }
     appData = deepMerge(idbBase, appData);
     _idbReady = true; // IDB 完整数据已加载，后续 saveData 可安全写入
@@ -4531,28 +4574,44 @@ function saveDataNow() {
 function _slimData(data) {
   // ★ 性能优化：避免 JSON.parse(JSON.stringify(data)) 整体深拷贝
   // 改为只对含 base64 的字段做按需浅拷贝，无图片的对象直接复用引用
+  const isB64 = v => typeof v === 'string' && v.startsWith('data:');
   const d = {
     ...data,
+    // ★ 修复：用户头像之前被刻意保留在精简版里（会被大 base64 图片撑爆 localStorage
+    // 5MB 配额），现在和其它图片字段一样统一剥离，只在 IndexedDB 完整版里保留。
+    userProfile: data.userProfile ? {
+      ...data.userProfile,
+      avatar: isB64(data.userProfile.avatar) ? '' : (data.userProfile.avatar || ''),
+      bgImage: isB64(data.userProfile.bgImage) ? '' : (data.userProfile.bgImage || '')
+    } : data.userProfile,
+    // ★ 修复：顶层 userAvatar 是 userProfile.avatar 之外的另一份头像存放位置
+    // （旧版兼容字段），同样可能是大 base64 图片，之前完全没被剥离。
+    userAvatar: isB64(data.userAvatar) ? '' : (data.userAvatar || ''),
     settings: data.settings ? {
       ...data.settings,
-      chatBg: (data.settings.chatBg && data.settings.chatBg.startsWith('data:')) ? '' : (data.settings.chatBg || '')
+      chatBg: isB64(data.settings.chatBg) ? '' : (data.settings.chatBg || '')
     } : data.settings,
     moments: data.moments
       ? data.moments.map(m => ({ ...m, images: m.images ? m.images.map(() => '') : [] }))
       : data.moments,
     myEmojiPacks:  data.myEmojiPacks  ? data.myEmojiPacks.map(() => '')  : data.myEmojiPacks,
     hisEmojiPacks: data.hisEmojiPacks ? data.hisEmojiPacks.map(() => '') : data.hisEmojiPacks,
+    // ★ 修复：状态卡片、呼叫按钮/结果里如果用户自定义了图标图片，也可能是 base64，
+    // 之前完全没有处理，同样会累积拖垮 localStorage 配额。
+    statusCards: data.statusCards ? data.statusCards.map(s => (s && isB64(s.icon)) ? { ...s, icon: '' } : s) : data.statusCards,
+    callButtons: data.callButtons ? data.callButtons.map(s => (s && isB64(s.icon)) ? { ...s, icon: '' } : s) : data.callButtons,
+    callResults: data.callResults ? data.callResults.map(s => (s && isB64(s.icon)) ? { ...s, icon: '' } : s) : data.callResults,
     chats: data.chats ? data.chats.map(c => {
-      const needsStrip = (c.avatar && c.avatar.startsWith('data:'))
-        || (c.callBg && c.callBg.startsWith('data:'))
-        || (c.messages && c.messages.some(m => m.type === 'image' && m.src && m.src.startsWith('data:')));
+      const needsStrip = isB64(c.avatar)
+        || isB64(c.callBg)
+        || (c.messages && c.messages.some(m => m.type === 'image' && isB64(m.src)));
       if (!needsStrip) return c; // 无 base64 时零拷贝，直接复用
       return {
         ...c,
-        avatar: (c.avatar && c.avatar.startsWith('data:')) ? '' : c.avatar,
-        callBg: (c.callBg && c.callBg.startsWith('data:')) ? '' : c.callBg,
+        avatar: isB64(c.avatar) ? '' : c.avatar,
+        callBg: isB64(c.callBg) ? '' : c.callBg,
         messages: c.messages ? c.messages.map(msg =>
-          (msg.type === 'image' && msg.src && msg.src.startsWith('data:'))
+          (msg.type === 'image' && isB64(msg.src))
             ? { ...msg, src: '' }
             : msg
         ) : c.messages
