@@ -4129,6 +4129,79 @@ const IDB_STORE   = 'appstore';
 const IDB_VERSION = 1;
 let _idb = null; // IndexedDB 实例缓存
 
+/**
+ * ════════════════════════════════════════════════════════════
+ * 存储自检：很多"数据每次都被重置"的情况，根本原因是浏览器本身
+ * 禁止了本网站写入 localStorage / IndexedDB（例如 iOS 设置里开了
+ * "阻止所有 Cookie"、无痕/隐私浏览模式、或存储配额已满），而这些
+ * 失败此前只在开发者控制台里打印 warning，普通用户完全看不到，
+ * 只会觉得"数据莫名其妙消失了"。
+ * 这里在页面加载时做一次真实的写入+读回测试，一旦发现存储不可用，
+ * 立刻在页面顶部弹出醒目提示，把原因和解决办法直接告诉用户。
+ * ════════════════════════════════════════════════════════════
+ */
+function _showStorageWarning(msg) {
+  let bar = document.getElementById('storageWarningBanner');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'storageWarningBanner';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
+      + 'background:#d33;color:#fff;font-size:13px;line-height:1.6;'
+      + 'padding:10px 40px 10px 14px;box-shadow:0 2px 8px rgba(0,0,0,.2);'
+      + 'font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;';
+    const closeBtn = document.createElement('span');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = 'position:absolute;right:12px;top:6px;font-size:20px;'
+      + 'cursor:pointer;line-height:1;padding:4px;';
+    closeBtn.onclick = () => bar.remove();
+    bar.appendChild(closeBtn);
+    const text = document.createElement('div');
+    text.id = 'storageWarningText';
+    bar.insertBefore(text, closeBtn);
+    document.body.appendChild(bar);
+  }
+  document.getElementById('storageWarningText').textContent = msg;
+  bar.style.display = 'block';
+}
+
+function _storageSelfTest() {
+  // 1) 同步测试 localStorage
+  try {
+    const testKey = '__mc_storage_test__';
+    localStorage.setItem(testKey, '1');
+    const ok = localStorage.getItem(testKey) === '1';
+    localStorage.removeItem(testKey);
+    if (!ok) throw new Error('write/read mismatch');
+  } catch (e) {
+    _showStorageWarning(
+      '⚠️ 检测到浏览器阻止了本网站保存数据，聊天记录将无法保留。常见原因：' +
+      'iPhone 设置→Safari浏览器→隐私与安全性→关闭"阻止所有 Cookie"；' +
+      '或退出无痕/隐私浏览模式后刷新本页。'
+    );
+    return;
+  }
+  // 2) 异步测试 IndexedDB 是否能真正打开
+  try {
+    if (!window.indexedDB) {
+      _showStorageWarning('⚠️ 当前浏览器不支持 IndexedDB，图片等数据无法保存，建议更换 Safari 或 Chrome 最新版本打开。');
+      return;
+    }
+    const req = indexedDB.open('__mc_idb_test__');
+    req.onerror = () => {
+      _showStorageWarning(
+        '⚠️ 浏览器阻止了本网站使用 IndexedDB，头像、表情包、图片等数据无法保存。常见原因：' +
+        'iPhone 设置→Safari浏览器→隐私与安全性→关闭"阻止所有 Cookie"；' +
+        '或退出无痕/隐私浏览模式后刷新本页。'
+      );
+    };
+    req.onsuccess = () => {
+      try { req.result.close(); indexedDB.deleteDatabase('__mc_idb_test__'); } catch (_) {}
+    };
+  } catch (e) {
+    _showStorageWarning('⚠️ IndexedDB 初始化异常，部分数据可能无法保存：' + e.message);
+  }
+}
+
 function _openIDB() {
   return new Promise((resolve, reject) => {
     if (_idb) { resolve(_idb); return; }
@@ -4333,6 +4406,7 @@ function _saveDataImmediate() {
     _idbSet(DATA_KEY, appData).catch(e => {
       console.warn('[MultiChat] IDB saveData error:', e);
       showToast('⚠️ 数据保存失败，请检查浏览器存储权限');
+      _showStorageWarning('⚠️ 数据保存失败：' + (e && e.message ? e.message : '未知错误') + '。请检查 Safari 隐私设置或存储空间后刷新重试，否则本次修改不会被保留。');
     });
   }
 
@@ -4341,8 +4415,11 @@ function _saveDataImmediate() {
     const slim = _slimData(appData);
     localStorage.setItem(DATA_KEY, JSON.stringify(slim));
   } catch (e) {
-    // localStorage 超限时静默失败（IDB 已是主存储）
+    // localStorage 超限或被禁用：若 IDB 也不可用，这会导致下次打开数据丢失，需提示用户
     try { localStorage.removeItem(DATA_KEY); } catch (_) {}
+    if (!_idbReady) {
+      _showStorageWarning('⚠️ 数据无法保存到本地，刷新或重新打开页面后修改内容会丢失。请检查浏览器隐私设置（如"阻止所有 Cookie"）或存储空间。');
+    }
   }
 }
 
@@ -4443,6 +4520,7 @@ let notifChatId   = null;
 const _viewRendered = {};
 
 window.addEventListener('load', function() {
+  _storageSelfTest();
   setTheme(appData.settings.theme || 'pink', false);
   setBubbleStyle(appData.settings.bubbleStyle || 'default', false);
   
