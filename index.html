@@ -3952,6 +3952,79 @@ body {
    ════════════════════════════════════════════════════════════ */
 const DATA_KEY = 'multichat_v12';
 
+/**
+ * ════════════════════════════════════════════════════════════
+ * 诊断面板：捕获所有运行时报错和存储状态，方便在手机上直接排查
+ * 而不需要连电脑用开发者工具。右下角会出现一个"🔧诊断"悬浮按钮，
+ * 点开可以看到详细日志。
+ * ════════════════════════════════════════════════════════════
+ */
+window._diagLog = [];
+function _diagPush(msg) {
+  try {
+    const time = new Date().toLocaleTimeString();
+    window._diagLog.push(`[${time}] ${msg}`);
+    if (window._diagLog.length > 200) window._diagLog.shift();
+    _updateDiagBadge();
+  } catch (_) {}
+}
+window.addEventListener('error', e => {
+  _diagPush('❌ JS错误: ' + (e.message || '') + ' @ ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
+});
+window.addEventListener('unhandledrejection', e => {
+  _diagPush('❌ Promise未处理错误: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+});
+function _updateDiagBadge() {
+  let btn = document.getElementById('_diagBtn');
+  if (!btn) {
+    if (!document.body) { window.addEventListener('DOMContentLoaded', _updateDiagBadge, { once: true }); return; }
+    btn = document.createElement('button');
+    btn.id = '_diagBtn';
+    btn.textContent = '🔧诊断';
+    btn.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:2147483647;background:#333;color:#fff;border:none;border-radius:20px;padding:8px 14px;font-size:12px;opacity:.85;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+    btn.onclick = _showDiagPanel;
+    document.body.appendChild(btn);
+  }
+  const errCount = window._diagLog.filter(l => l.includes('❌')).length;
+  btn.textContent = errCount > 0 ? `🔧诊断(${errCount}个错误)` : '🔧诊断';
+  btn.style.background = errCount > 0 ? '#d33' : '#333';
+}
+function _showDiagPanel() {
+  let panel = document.getElementById('_diagPanel');
+  if (panel) { panel.remove(); return; }
+  panel = document.createElement('div');
+  panel.id = '_diagPanel';
+  panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.94);color:#0f0;font-family:monospace;font-size:11px;padding:16px;padding-top:44px;overflow:auto;white-space:pre-wrap;word-break:break-all;';
+  let lsTest = '未知';
+  try { localStorage.setItem('__diag_t','1'); lsTest = (localStorage.getItem('__diag_t')==='1') ? '正常' : '写入后读取不一致！'; localStorage.removeItem('__diag_t'); } catch (e) { lsTest = '失败: ' + e.message; }
+  let lsDataLen = '未知';
+  try { const v = localStorage.getItem(DATA_KEY); lsDataLen = v ? (v.length + ' 字符') : '⚠️ 无数据（说明从未成功保存过，或已被清空）'; } catch (e) { lsDataLen = '读取失败: ' + e.message; }
+  const info = [
+    '=== 存储状态 ===',
+    'localStorage读写测试: ' + lsTest,
+    'localStorage里 ' + DATA_KEY + ' 的内容: ' + lsDataLen,
+    'IndexedDB支持: ' + (window.indexedDB ? '是' : '否，此浏览器不支持'),
+    'IndexedDB就绪(_idbReady): ' + (typeof _idbReady !== 'undefined' ? _idbReady : '未知'),
+    '当前 appData.chats 数量: ' + (typeof appData !== 'undefined' && appData ? appData.chats.length : '未初始化'),
+    '',
+    '=== 环境信息 ===',
+    'UserAgent: ' + navigator.userAgent,
+    '当前网址: ' + location.href,
+    '页面协议: ' + location.protocol,
+    '',
+    '=== 运行日志（按时间顺序）===',
+    ...window._diagLog
+  ].join('\n');
+  panel.textContent = info;
+  const closeBtn = document.createElement('div');
+  closeBtn.textContent = '✕ 点击任意处关闭（可长按选中文字复制发给开发者）';
+  closeBtn.style.cssText = 'position:fixed;top:6px;left:16px;right:16px;color:#fff;background:#333;padding:6px;font-family:sans-serif;font-size:12px;';
+  panel.insertBefore(closeBtn, panel.firstChild);
+  panel.addEventListener('click', (e) => { if (e.target === panel || e.target === closeBtn) panel.remove(); });
+  document.body.appendChild(panel);
+}
+_diagPush('脚本开始执行');
+
 /** 默认 appData 结构（无示例角色，保留丰富词卡/状态/签名库） */
 const DEFAULT_DATA = {
   version: 1,
@@ -4270,7 +4343,8 @@ function _idbSet(key, value) {
 function loadData() {
   try {
     const raw = localStorage.getItem(DATA_KEY);
-    if (!raw) return JSON.parse(JSON.stringify(DEFAULT_DATA));
+    if (!raw) { _diagPush('ℹ️ loadData: localStorage中没有找到 ' + DATA_KEY + '，使用默认数据'); return JSON.parse(JSON.stringify(DEFAULT_DATA)); }
+    _diagPush('ℹ️ loadData: 从localStorage读到 ' + raw.length + ' 字符的已保存数据');
     const saved = JSON.parse(raw);
     const result = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DATA)), saved);
     // ★ 拍一拍文案兜底：若加载后 patMessages 为空，恢复默认 17 条
@@ -4382,8 +4456,11 @@ async function loadDataAsync() {
     renderMyEmojiGrid();
     renderHisEmojiGrid();
     renderCards();
+    _diagPush('✅ loadDataAsync 完成，IndexedDB数据已加载合并');
   } catch (e) {
     console.warn('[MultiChat] loadDataAsync error:', e);
+    _diagPush('❌ loadDataAsync 出错: ' + (e && e.message ? e.message : String(e)));
+    _showStorageWarning('⚠️ 加载已保存数据时出错：' + (e && e.message ? e.message : '未知错误') + '。点右下角"🔧诊断"按钮查看详情。');
   }
 }
 
@@ -4403,19 +4480,27 @@ function _saveDataImmediate() {
   _saveDataTimer = null;
   // 异步写 IndexedDB（完整数据含图片）—— 仅在 IDB 已就绪后写入，避免用精简数据覆盖完整数据
   if (_idbReady) {
-    _idbSet(DATA_KEY, appData).catch(e => {
+    _idbSet(DATA_KEY, appData).then(() => {
+      _diagPush('✅ IndexedDB 保存成功');
+    }).catch(e => {
       console.warn('[MultiChat] IDB saveData error:', e);
+      _diagPush('❌ IndexedDB 保存失败: ' + (e && e.message ? e.message : String(e)));
       showToast('⚠️ 数据保存失败，请检查浏览器存储权限');
       _showStorageWarning('⚠️ 数据保存失败：' + (e && e.message ? e.message : '未知错误') + '。请检查 Safari 隐私设置或存储空间后刷新重试，否则本次修改不会被保留。');
     });
+  } else {
+    _diagPush('⏳ IndexedDB尚未就绪，本次跳过IDB写入（仅写localStorage）');
   }
 
   // 同步写 localStorage（精简版，剥离 base64 图片以防超限）
   try {
     const slim = _slimData(appData);
-    localStorage.setItem(DATA_KEY, JSON.stringify(slim));
+    const json = JSON.stringify(slim);
+    localStorage.setItem(DATA_KEY, json);
+    _diagPush('✅ localStorage 保存成功 (' + json.length + ' 字符)');
   } catch (e) {
     // localStorage 超限或被禁用：若 IDB 也不可用，这会导致下次打开数据丢失，需提示用户
+    _diagPush('❌ localStorage 保存失败: ' + (e && e.message ? e.message : String(e)));
     try { localStorage.removeItem(DATA_KEY); } catch (_) {}
     if (!_idbReady) {
       _showStorageWarning('⚠️ 数据无法保存到本地，刷新或重新打开页面后修改内容会丢失。请检查浏览器隐私设置（如"阻止所有 Cookie"）或存储空间。');
