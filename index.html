@@ -2077,6 +2077,7 @@ body {
     </div>
     <div class="nav-item" data-view="mailbox" onclick="switchView('mailbox',this)" title="双人信箱">
       <i class="fa-regular fa-envelope"></i>
+      <span class="badge" id="railMailBadge" style="display:none"></span>
     </div>
     <div class="nav-item" data-view="spellcards" onclick="openSpellCardsGeneric(this)" title="拼字卡">
       <i class="fa-solid fa-shuffle"></i>
@@ -3106,7 +3107,7 @@ body {
               <i class="fa-solid fa-plus"></i> 添加
             </button>
           </div>
-          <div id="emojiLibGrid" style="display:flex;flex-wrap:wrap;gap:8px;padding:14px;overflow-y:auto;flex:1;align-content:flex-start;"></div>
+          <div id="emojiLibGrid" style="display:flex;flex-direction:column;gap:14px;padding:14px;overflow-y:auto;flex:1;"></div>
         </div>
       </div>
     </div>
@@ -3918,7 +3919,7 @@ body {
       <button class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div class="modal-body">
-      <textarea class="modal-input" rows="3" placeholder="输入 Emoji，直接粘贴，每个单独或连续输入均可" id="newEmojiLibText" style="resize:vertical;font-size:20px;line-height:2;"></textarea>
+      <textarea class="modal-input" rows="4" placeholder="每行为一个表情条目：单独一个 emoji 占一行 = 单个表情；把想组合在一起发送的几个 emoji 写在同一行 = 作为一个整体的组合表情保存，抽取时直接当成一个表情" id="newEmojiLibText" style="resize:vertical;font-size:20px;line-height:2;"></textarea>
     </div>
     <div class="modal-footer">
       <button class="btn cancel" onclick="closeModal()">取消</button>
@@ -5097,8 +5098,11 @@ function renderMessages(chatId) {
   // 应用自定义背景
   area.style.backgroundImage = appData.settings.chatBg ? `url(${appData.settings.chatBg})` : '';
 
-  area.innerHTML = '<div class="date-divider">今天</div>';
-  if (!chat) return;
+  area.innerHTML = '';
+  if (!chat || chat.messages.length === 0) {
+    area.innerHTML = '<div class="date-divider">今天</div>';
+    return;
+  }
 
   const total = chat.messages.length;
   const startIdx = Math.max(0, total - MESSAGES_PAGE_SIZE);
@@ -5113,14 +5117,19 @@ function renderMessages(chatId) {
     area.appendChild(moreBtn);
   }
 
+  // 按自然天分组显示日期分割线（今天/昨天/具体日期），而不是按固定条数——
+  // 每当相邻两条消息不在同一天，就在这条消息前插入一条分割线
+  let lastDayKey = null;
   for (let i = startIdx; i < total; i++) {
     const msg = chat.messages[i];
-    // 时间戳：首条必显 + 间隔 > 5min（简化为每隔5条显示）
-    if (i > 0 && i % 5 === 0) {
+    const ts = _entryTs(msg);
+    const dayKey = _dayKey(ts);
+    if (dayKey !== lastDayKey) {
       const divider = document.createElement('div');
       divider.className = 'date-divider';
-      divider.textContent = msg.time;
+      divider.textContent = _dayLabel(ts);
       area.appendChild(divider);
+      lastDayKey = dayKey;
     }
     appendBubble(msg, chat, false);
   }
@@ -5134,24 +5143,37 @@ function _loadEarlierMessages(chatId) {
   if (!chat) return;
   const startIdx = parseInt(area.dataset.renderStart || '0', 10);
   if (startIdx <= 0) return;
+  const total = chat.messages.length;
   const newStart = Math.max(0, startIdx - MESSAGES_PAGE_SIZE);
   const moreBtn = area.querySelector('.load-more-msgs');
   const anchor = moreBtn ? moreBtn.nextSibling : area.firstChild;
 
+  // 已渲染内容里最早一条消息所在的"天"，用来判断这批新加载消息的最后一条是否与它同一天：
+  // 同一天的话，原来贴在它上面的那条分割线就不再是当天的起点了，需要去掉，避免同一天出现两条分割线
+  const firstRenderedDayKey = total > startIdx ? _dayKey(_entryTs(chat.messages[startIdx])) : null;
+
   const frag = document.createDocumentFragment();
+  let lastDayKey = null;
   for (let i = newStart; i < startIdx; i++) {
     const msg = chat.messages[i];
-    if (i > 0 && i % 5 === 0) {
+    const ts = _entryTs(msg);
+    const dayKey = _dayKey(ts);
+    if (dayKey !== lastDayKey) {
       const divider = document.createElement('div');
       divider.className = 'date-divider';
-      divider.textContent = msg.time;
+      divider.textContent = _dayLabel(ts);
       frag.appendChild(divider);
+      lastDayKey = dayKey;
     }
     frag.appendChild(appendBubble(msg, chat, false, false));
   }
 
   const prevScrollHeight = area.scrollHeight;
   area.insertBefore(frag, anchor);
+  // anchor 在正常情况下就是原本贴在最上面的那条分割线；如果这批新内容与它同一天，就把它去掉
+  if (lastDayKey !== null && lastDayKey === firstRenderedDayKey && anchor && anchor.classList && anchor.classList.contains('date-divider')) {
+    anchor.remove();
+  }
   area.dataset.renderStart = newStart;
   if (newStart === 0 && moreBtn) moreBtn.remove();
   // 保持视觉位置不变（新内容插入到顶部，滚动条相应下移）
@@ -5494,16 +5516,12 @@ function _fillPatText(template, activeName, passiveName, userIsActive) {
     .replace(/\u0002/g, passiveName);
 }
 
-/** 内部：从 emoji 库随机抽取 1~3 个表情并拼接成组合（而非每次只有一个） */
+/** 内部：从 emoji 库随机抽取一条记录。
+ *  库里的每一条本身就是一张"表情卡"——单个 emoji 或用户自己组合好的一串 emoji（见表情符号库的添加方式：
+ *  同一行 = 同一张卡），这里只负责随机抽取，不再对多条记录做二次随机拼接。 */
 function _pickEmojiCombo(emojiLib) {
   if (!emojiLib || emojiLib.length === 0) return '';
-  const r = Math.random();
-  const n = r < 0.45 ? 1 : r < 0.8 ? 2 : 3; // 45% 单个 / 35% 两个 / 20% 三个
-  let combo = '';
-  for (let i = 0; i < n; i++) {
-    combo += emojiLib[Math.floor(Math.random() * emojiLib.length)];
-  }
-  return combo;
+  return emojiLib[Math.floor(Math.random() * emojiLib.length)];
 }
 
 /** 内部：生成并推送一条自动回复消息 */
@@ -5527,7 +5545,7 @@ function _sendOneAutoReply(chat, activeCards, settings) {
 
   let pieces = picks.map(p => (p && typeof p === 'object') ? p.text : p);
 
-  // ── Emoji 附带（每张字卡独立概率，由设置控制）
+  // ── Emoji 附带：从库里抽一条（库里每条本身就是用户配置好的单个/组合表情），由设置控制概率和是否混排
   const emojiMix = settings.emojiMixMode;
   const emojiLib = appData.emojiLib || [];
   const emojiProb = (settings.emojiProb ?? 20) / 100;
@@ -6215,6 +6233,11 @@ function deleteContact(id) {
   _pendingDeleteId = id;
   const overlay = document.getElementById('deleteConfirmOverlay');
   if (overlay) {
+    // ★ 防御性修复：万一这个 .modal-box 之前被其它逻辑误设了内联 display:none
+    // （历史 bug，已在 openModal() 里修复根源），这里保险起见强制清掉，
+    // 确保确认框内容一定可见，不会再出现"卡在模糊背景"的情况。
+    const box = overlay.querySelector('.modal-box');
+    if (box) box.style.display = '';
     overlay.classList.add('open');
   } else {
     // 兜底：直接删除
@@ -6829,6 +6852,13 @@ function scheduleAutoMoment() {
   }, 5 * 60 * 60 * 1000); // 5小时
 }
 
+/** 更新信箱未读来信数的红点角标（导航栏「信箱」图标右上角），逻辑与朋友圈通知角标一致 */
+function _updateMailBadge() {
+  const unread = ((appData.mailbox && appData.mailbox.received) || []).filter(m => !m.read).length;
+  const railBadge = document.getElementById('railMailBadge');
+  if (railBadge) railBadge.style.display = unread > 0 ? '' : 'none';
+}
+
 /** 更新朋友圈通知 badge */
 function updateMomentBadge() {
   const unread = (appData.momentNotifications || []).filter(n => !n.read).length;
@@ -6971,6 +7001,23 @@ function renderOtherMoment(chatId) {
 /* ════════════════════════════════════════════════════════════
    表情包
    ════════════════════════════════════════════════════════════ */
+/** 准确统计一条 emoji 记录里包含几个"视觉上独立的表情"（grapheme），
+ *  优先用 Intl.Segmenter 按字形簇切分（能正确处理 ZWJ 组合、肤色修饰符、旗帜等复合 emoji，
+ *  不会被误判成"多个"）；不支持的旧环境退化为按码位数粗略估算。 */
+function _countEmojiGraphemes(str) {
+  if (!str) return 0;
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      return Array.from(seg.segment(str)).length;
+    }
+  } catch (e) { /* 忽略，走回退方案 */ }
+  return Array.from(str).length;
+}
+
+/** 表情符号快捷库展示：按"单个 emoji"和"组合 emoji（同一条记录里含多个）"分两组显示，
+ *  组内仍按库里原有顺序排列，点击删除时用的是该条记录在 appData.emojiLib 里的真实下标，
+ *  与分组显示无关，保证删除的还是你点的那一条。 */
 function renderEmojis() {
   const grid = document.getElementById('emojiLibGrid');
   if (!grid) return;
@@ -6980,31 +7027,58 @@ function renderEmojis() {
     grid.innerHTML = '<div style="width:100%;text-align:center;color:var(--text-hint);font-size:12px;padding:40px 0;">还没有 Emoji，点右上角 + 添加</div>';
     return;
   }
+
+  const singleEntries = [];
+  const comboEntries = [];
   lib.forEach((em, idx) => {
+    (_countEmojiGraphemes(em) > 1 ? comboEntries : singleEntries).push(idx);
+  });
+
+  const makeTile = (idx) => {
+    const em = lib[idx];
     const el = document.createElement('div');
-    el.style.cssText = 'position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:24px;border-radius:8px;background:var(--surface-2);border:0.5px solid var(--border);cursor:pointer;flex-shrink:0;';
+    el.style.cssText = 'position:relative;min-width:44px;height:44px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;font-size:24px;border-radius:8px;background:var(--surface-2);border:0.5px solid var(--border);cursor:pointer;flex-shrink:0;white-space:nowrap;';
     el.title = '点击删除';
     el.textContent = em;
     el.onclick = () => { deleteEmojiLibItem(idx); };
-    grid.appendChild(el);
-  });
+    return el;
+  };
+
+  const makeSection = (label, indices) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:100%;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:11px;color:var(--text-hint);margin:2px 0 6px;';
+    title.textContent = `${label}（${indices.length}）`;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;';
+    indices.forEach(idx => row.appendChild(makeTile(idx)));
+    wrap.appendChild(title);
+    wrap.appendChild(row);
+    return wrap;
+  };
+
+  if (singleEntries.length > 0) grid.appendChild(makeSection('单个 Emoji', singleEntries));
+  if (comboEntries.length > 0) grid.appendChild(makeSection('组合 Emoji', comboEntries));
 }
 
 function addEmojiLibItems() {
   const textarea = document.getElementById('newEmojiLibText');
   if (!textarea) return;
-  // 用 Intl.Segmenter 或 spread 拆分单个 emoji
-  const raw = textarea.value.trim();
-  if (!raw) { showToast('请输入 Emoji'); return; }
-  const segments = [...new Intl.Segmenter().segment(raw)].map(s => s.segment).filter(s => s.trim());
-  if (segments.length === 0) { showToast('未识别到有效 Emoji'); return; }
+  // 按行拆分：一行 = 库里的一条记录。单独一个 emoji 独占一行就是单个表情；
+  // 把想组合发送的几个 emoji 写在同一行，就会作为一个整体保存，抽取时直接当成一个表情，
+  // 不会再被拆开逐个单发，也不需要额外的"随机拼接"逻辑。
+  const raw = textarea.value;
+  if (!raw.trim()) { showToast('请输入 Emoji'); return; }
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+  if (lines.length === 0) { showToast('未识别到有效 Emoji'); return; }
   if (!appData.emojiLib) appData.emojiLib = [];
-  appData.emojiLib.push(...segments);
+  appData.emojiLib.push(...lines);
   textarea.value = '';
   saveData();
   renderEmojis();
   closeModal();
-  showToast(`已添加 ${segments.length} 个 Emoji`);
+  showToast(`已添加 ${lines.length} 条`);
 }
 
 function deleteEmojiLibItem(idx) {
@@ -7300,6 +7374,7 @@ function renderMailList() {
     ? appData.mailbox.received
     : appData.mailbox.sent;
   list.innerHTML = '';
+  _updateMailBadge();
   if (mails.length === 0) {
     list.innerHTML = '<div class="empty-state"><i class="fa-regular fa-envelope"></i><p>暂无信件</p></div>';
     return;
@@ -7312,7 +7387,7 @@ function renderMailList() {
       ${!m.read ? '<div class="mail-dot"></div>' : ''}
       <div class="mail-subject">${escHtml(m.subject)}</div>
       <div class="mail-preview">${escHtml(m.preview)}</div>
-      <div class="mail-date">${m.date}</div>
+      <div class="mail-date">${formatFullDateTime(_entryTs(m))}</div>
     `;
     list.appendChild(item);
   });
@@ -7332,7 +7407,7 @@ function sendMail() {
   const sub  = document.getElementById('mailSubject').value.trim();
   const body = document.getElementById('mailBody').value.trim();
   if (!sub || !body) { showToast('请填写主题和内容'); return; }
-  const newMail = { id: Date.now(), chatId: currentChatId, subject: sub, body, preview: body.slice(0, 40), date: '刚刚', read: true, replyChain: [] };
+  const newMail = { id: Date.now(), chatId: currentChatId, subject: sub, body, preview: body.slice(0, 40), ts: Date.now(), read: true, replyChain: [] };
   appData.mailbox.sent.unshift(newMail);
   saveData();
   closeModal();
@@ -7342,10 +7417,12 @@ function sendMail() {
     setTimeout(() => {
       const active = _getGeneralActiveCards();
       const txt = active[Math.floor(Math.random() * active.length)] || '收到你的信了，我也有话想对你说…';
-      appData.mailbox.received.unshift({ id: Date.now(), chatId: currentChatId, subject: 'Re: ' + sub, body: txt, preview: txt.slice(0, 40), date: '刚刚', read: false, replyChain: [] });
+      const newMail = { id: Date.now(), chatId: currentChatId, subject: 'Re: ' + sub, body: txt, preview: txt.slice(0, 40), ts: Date.now(), read: false, replyChain: [] };
+      appData.mailbox.received.unshift(newMail);
       renderMailList();
       saveData();
-      showToast('📬 收到新信件！');
+      _updateMailBadge();
+      showMailNotifPopup(newMail);
     }, 3000 + Math.random() * 3000);
   }
 }
@@ -7910,7 +7987,7 @@ function endCall(reason = 'normal') {
     showToast('对方未接听');
     // 未接后回复
     if (isSpell) {
-      setTimeout(() => _sendSpellMessage(), 2000 + Math.random() * 3000);
+      setTimeout(() => _sendSpellReplyBatch(), 2000 + Math.random() * 3000);
     } else {
       setTimeout(() => triggerAutoReply(chat, null), 2000 + Math.random() * 3000);
     }
@@ -8440,7 +8517,12 @@ function handleNotifClick() {
 let currentModal = null;
 function openModal(id) {
   document.getElementById('modalOverlay').classList.add('open');
-  document.querySelectorAll('.modal-box').forEach(m => m.style.display = 'none');
+  // ★ 修复：之前用的是全局 querySelectorAll('.modal-box')，会连带把删除确认框
+  // （#deleteConfirmOverlay 内的 .modal-box，属于另一套独立弹窗机制）也设成
+  // display:none，且这个内联样式此后不会被清除。导致删除联系人时，外层模糊
+  // 背景能正常弹出，但里面的确认对话框却被锁死在隐藏状态，界面卡住无法操作。
+  // 改为只重置本弹窗系统（#modalOverlay 内）自己的 .modal-box，不影响其他独立弹窗。
+  document.querySelectorAll('#modalOverlay .modal-box').forEach(m => m.style.display = 'none');
   const box = document.getElementById('modal-' + id);
   if (box) box.style.display = 'block';
   currentModal = id;
@@ -8808,6 +8890,51 @@ function getTime() {
   const n = new Date();
   return `${n.getHours().toString().padStart(2,'0')}:${n.getMinutes().toString().padStart(2,'0')}`;
 }
+
+/* ────────────────────────────────────────────────────────────
+   日期 / 时间显示工具
+   本项目里消息、信件等对象的 id 从一开始就是用 Date.now()（必要时再加一个 <1 的随机小数用来去重）
+   生成的，所以不需要给每条历史数据额外补一个时间戳字段，直接从 id 反推创建时间即可对所有
+   已有数据都生效。有些对象（比如信箱回信链里的单条回信）额外显式带了 ts 字段的话优先用 ts。
+   ──────────────────────────────────────────────────────────── */
+
+/** 从消息 / 信件 / 回信等对象上还原出创建时间的毫秒时间戳。 */
+function _entryTs(obj) {
+  if (obj && typeof obj.ts === 'number' && obj.ts > 0) return obj.ts;
+  const n = obj ? Number(obj.id) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : Date.now();
+}
+
+/** 按本地时间计算"天"的边界，返回可直接比较的字符串 key，用于判断两个时间戳是不是同一天。 */
+function _dayKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** 相对日期标签：今天 / 昨天 / 今年内的其他日期显示"M月D日" / 跨年显示"YYYY年M月D日"。
+ *  按本地时间（读取设备当前时间）计算"今天"是哪一天，配合每天 12:00 的定时刷新
+ *  （见 _scheduleDateLabelRefresh），即使聊天窗口从头一天开到第二天也能自动更新，不需要手动刷新页面。 */
+function _dayLabel(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const startOfDay = dt => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '昨天';
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+/** 具体时刻（HH:MM），与 getTime() 的格式保持一致，供根据时间戳反推时间时使用。 */
+function _timeOfDay(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+/** 信箱等"每一条独立展示时间"的场景：日期标签 + 具体时间，例如"昨天 14:30" "8月20日 09:15"。 */
+function formatFullDateTime(ts) {
+  return `${_dayLabel(ts)} ${_timeOfDay(ts)}`;
+}
 function escHtml(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -8980,15 +9107,34 @@ function _appendSpellBubble(msg, scroll = true) {
     ? `<div class="bubble img-bubble"><img src="${msg.src || ''}" alt="图片" loading="lazy" decoding="async" onclick="window.open(this.src)"></div>`
     : `<div class="bubble">${escHtml(msg.text)}</div>`;
 
+  // 已读标记：与普通聊天一致，受"已读标记"总开关控制，仅自己发的消息显示
+  const readMark = isSelf && appData.settings.readReceipt
+    ? `<span class="msg-read">${msg.read ? '已读' : ''}</span>`
+    : '';
+
   row.innerHTML = `
     ${isSelf ? selfAv : otherAv}
     <div class="msg-content">
       ${bubbleHtml}
-      <div class="msg-meta"><span class="msg-time">${msg.time || ''}</span></div>
+      <div class="msg-meta"><span class="msg-time">${msg.time || ''}</span>${readMark}</div>
     </div>
   `;
   area.appendChild(row);
   if (scroll) area.scrollTop = area.scrollHeight;
+}
+
+/** 把当前拼字卡上下文里所有"自己发的、尚未标记已读"的消息标为已读，
+ *  并在拼字卡界面处于可见状态时刷新显示（与普通聊天的已读逻辑保持一致的体验） */
+function _markSpellMessagesRead() {
+  const list = _spellMessagesList();
+  let changed = false;
+  list.forEach(m => {
+    if (m.from === 'self' && !m.read) { m.read = true; changed = true; }
+  });
+  if (changed) {
+    saveData();
+    if (currentView === 'spellcards') renderSpellMessages();
+  }
 }
 
 /** 用户在拼字卡界面手动发送一条消息（自己说的话，正常展示、正常存档），
@@ -8999,7 +9145,7 @@ function sendSpellUserMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  const msg = { id: Date.now() + Math.random(), from: 'self', text, time: getTime() };
+  const msg = { id: Date.now() + Math.random(), from: 'self', text, time: getTime(), read: false };
   const list = _spellMessagesList();
   list.push(msg);
   if (list.length > 300) list.splice(0, list.length - 300);
@@ -9040,8 +9186,23 @@ function _scheduleQuickSpellReply() {
   clearTimeout(_quickSpellReplyTimer);
   const delay = 800 + Math.random() * 2200;
   _quickSpellReplyTimer = setTimeout(() => {
-    _sendSpellMessage();
+    _sendSpellReplyBatch();
   }, delay);
+}
+
+/** 拼字卡「正在输入…」提示：临时把头部状态区改成输入中，
+ *  即使当前是未关联角色的通用拼字卡（状态区默认隐藏）也会临时显示出来 */
+function _showSpellTyping() {
+  const statEl = document.getElementById('spellHeaderStatus');
+  if (!statEl) return;
+  statEl.textContent = '对方正在输入…';
+  statEl.style.color = '';
+  statEl.style.display = '';
+}
+
+/** 恢复拼字卡头部状态：关联了角色则恢复该角色状态，否则恢复默认隐藏 */
+function _restoreSpellHeaderStatus() {
+  renderSpellCardHeader();
 }
 
 /* ── 拼字卡专属表情包面板：与普通聊天的表情包面板完全独立，发送的表情只进拼字卡记录 ── */
@@ -9076,7 +9237,7 @@ function renderSpellEmojiPanel() {
 
 /** 拼字卡界面发送一张表情包（自己发的，进拼字卡专属记录，不写入普通聊天记录） */
 function sendSpellSticker(src) {
-  const msg = { id: Date.now() + Math.random(), from: 'self', type: 'image', src, text: '[表情包]', time: getTime() };
+  const msg = { id: Date.now() + Math.random(), from: 'self', type: 'image', src, text: '[表情包]', time: getTime(), read: false };
   const list = _spellMessagesList();
   list.push(msg);
   if (list.length > 300) list.splice(0, list.length - 300);
@@ -9107,13 +9268,46 @@ function scheduleSpellMessage() {
   const delay = lo + Math.random() * (hi - lo);
 
   _spellMsgTimer = setTimeout(() => {
-    _sendSpellMessage();
+    _sendSpellReplyBatch();
     scheduleSpellMessage();
   }, delay);
 }
 
-/** 生成并发送一条拼字卡消息：从字库中随机抽取 min~max 个字拼接成一条，每次只发一条 */
-function _sendSpellMessage() {
+/**
+ * 拼字卡"一轮回复"：把普通聊天的三个行为搬到拼字卡——
+ * 1) 已读：先把当前上下文里自己发的未读消息标记为已读
+ * 2) 正在输入…：短暂显示后再真正发出消息
+ * 3) 随机回复条数：75% 发 1 条 / 20% 发 2 条 / 5% 发 3 条，条与条之间有间隔
+ * 由后台定时器（scheduleSpellMessage）和用户发消息后的快速回复（_scheduleQuickSpellReply）共用
+ */
+function _sendSpellReplyBatch() {
+  const pool = appData.spellChars || [];
+  if (pool.length === 0) return; // 字库为空则跳过，等待用户手动更新
+
+  // ── 已读：先标记，再显示"正在输入…"，顺序与普通聊天一致
+  _markSpellMessagesRead();
+
+  const showTyping = currentView === 'spellcards';
+  if (showTyping) _showSpellTyping();
+
+  const typingDelay = 500 + Math.random() * 900;
+  setTimeout(() => {
+    const rr = Math.random();
+    const replyCount = rr < 0.75 ? 1 : rr < 0.95 ? 2 : 3;
+
+    for (let ri = 0; ri < replyCount; ri++) {
+      const msgDelay = ri * (600 + Math.random() * 900); // 每条间隔约 0.6~1.5s
+      setTimeout(() => {
+        _sendOneSpellMessage();
+        if (ri === replyCount - 1 && showTyping) _restoreSpellHeaderStatus();
+      }, msgDelay);
+    }
+  }, typingDelay);
+}
+
+/** 生成并发送一条拼字卡消息：从字库中随机抽取 min~max 个字拼接成一条，
+ *  并按「Emoji 附带概率」「Emoji 混合模式」从表情符号库随机附带一条表情记录（库里每条本身就是单个/组合表情，直接使用，不再拆分单发） */
+function _sendOneSpellMessage() {
   const pool = appData.spellChars || [];
   if (pool.length === 0) return; // 字库为空则跳过，等待用户手动更新
 
@@ -9127,6 +9321,20 @@ function _sendSpellMessage() {
     text += pool[Math.floor(Math.random() * pool.length)];
   }
 
+  // ── Emoji 附带：与普通聊天共用同一套设置（附带概率 / 混合模式）和同一个组合抽取函数，
+  //    保证抽到的是"一组"表情（例如 😊🥰✨ 连在一起），而不是一次只有一个
+  const emojiLib = appData.emojiLib || [];
+  const emojiProb = (appData.settings.emojiProb ?? 20) / 100;
+  let emojiToSendAlone = null;
+  if (emojiLib.length > 0 && Math.random() < emojiProb) {
+    const em = _pickEmojiCombo(emojiLib);
+    if (appData.settings.emojiMixMode) {
+      text = Math.random() < 0.5 ? em + text : text + em;
+    } else {
+      emojiToSendAlone = em;
+    }
+  }
+
   const msg = { id: Date.now() + Math.random(), from: 'other', text, time: getTime() };
   const list = _spellMessagesList();
   list.push(msg);
@@ -9138,6 +9346,18 @@ function _sendSpellMessage() {
 
   if (currentView === 'spellcards') {
     _appendSpellBubble(msg);
+  }
+
+  // 非混合模式：组合表情作为单独一条消息紧接着发出（同样是"一组"，不是逐个字符拆开）
+  if (emojiToSendAlone) {
+    setTimeout(() => {
+      const emMsg = { id: Date.now() + Math.random(), from: 'other', text: emojiToSendAlone, time: getTime() };
+      const list2 = _spellMessagesList();
+      list2.push(emMsg);
+      if (list2.length > 300) list2.splice(0, list2.length - 300);
+      saveData();
+      if (currentView === 'spellcards') _appendSpellBubble(emMsg);
+    }, 350);
   }
 }
 
@@ -9154,7 +9374,19 @@ function renderSpellMessages() {
       : '<div class="empty-state"><i class="fa-solid fa-shuffle"></i><p>还没有拼字消息，发一条试试，或等待自动拼组～</p></div>';
     return;
   }
-  msgs.forEach(m => _appendSpellBubble(m, false));
+  let lastDayKey = null;
+  msgs.forEach(m => {
+    const ts = _entryTs(m);
+    const dayKey = _dayKey(ts);
+    if (dayKey !== lastDayKey) {
+      const divider = document.createElement('div');
+      divider.className = 'date-divider';
+      divider.textContent = _dayLabel(ts);
+      area.appendChild(divider);
+      lastDayKey = dayKey;
+    }
+    _appendSpellBubble(m, false);
+  });
   area.scrollTop = area.scrollHeight;
 }
 
@@ -10622,6 +10854,7 @@ function openMail(mail) {
   mail.read = true;
   saveData();
   renderMailList();
+  _updateMailBadge();
 
   document.getElementById('mailDetailSubject').textContent = mail.subject;
   const body = document.getElementById('mailDetailBody');
@@ -10629,13 +10862,13 @@ function openMail(mail) {
   // 渲染回复链
   const chain = mail.replyChain || [];
   let html = `<div style="padding:16px 18px;border-bottom:0.5px solid var(--border);">
-    <div style="font-size:11px;color:var(--text-hint);margin-bottom:6px;">${mail.date}</div>
+    <div style="font-size:11px;color:var(--text-hint);margin-bottom:6px;">${formatFullDateTime(_entryTs(mail))}</div>
     <div style="font-size:13px;line-height:1.8;white-space:pre-wrap;">${escHtml(mail.body)}</div>
   </div>`;
   chain.forEach(r => {
     const isMe = r.from === 'self';
     html += `<div style="padding:12px 18px;border-bottom:0.5px solid var(--border);background:${isMe ? 'var(--bubble-self-bg,#fce4ec)' : 'var(--surface-2)'};">
-      <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">${isMe ? '我' : getChatById(mail.chatId)?.name || 'TA'} · ${r.date}</div>
+      <div style="font-size:11px;color:var(--text-hint);margin-bottom:4px;">${isMe ? '我' : getChatById(mail.chatId)?.name || 'TA'} · ${formatFullDateTime(_entryTs(r))}</div>
       <div style="font-size:13px;line-height:1.8;white-space:pre-wrap;">${escHtml(r.body)}</div>
     </div>`;
   });
@@ -10655,7 +10888,7 @@ function replyMail() {
   const text = prompt('写回信内容：');
   if (!text || !text.trim()) return;
 
-  const replyEntry = { from: 'self', body: text.trim(), date: '刚刚' };
+  const replyEntry = { from: 'self', body: text.trim(), ts: Date.now() };
   if (!mail.replyChain) mail.replyChain = [];
   mail.replyChain.push(replyEntry);
   saveData();
@@ -10674,24 +10907,53 @@ function replyMail() {
       const replyText = active.length > 0
         ? active.sort(() => Math.random() - .5).slice(0, 1 + Math.floor(Math.random() * 2)).join('，')
         : '收到了，我也想了很多……';
-      mail.replyChain.push({ from: 'other', body: replyText, date: '刚刚' });
+      mail.replyChain.push({ from: 'other', body: replyText, ts: Date.now() });
+      mail.read = false; // 有新回信，重新标为未读，等用户点开
       saveData();
       renderMailList();
-      showToast(`📬 ${chat.name} 回信了！`);
-      // 若信件详情还开着则刷新
-      if (document.getElementById('modal-mailDetail').style.display !== 'none') {
+      // 若信件详情还开着（用户正在这封信里）则直接刷新，无需弹窗打断
+      if (document.getElementById('modal-mailDetail').style.display !== 'none' && _openMailObj && _openMailObj.id === mail.id) {
         openMail(mail);
+      } else {
+        showMailNotifPopup(mail, { label: `${chat.name} 回信了`, preview: replyText });
       }
     }, delay);
   }
 }
 
-let _autoMailTimer = null;
-function scheduleAutoMail() {
-  clearTimeout(_autoMailTimer);
-  // 每 12h，5% 概率有角色来信
-  const interval = 12 * 60 * 60 * 1000;
-  _autoMailTimer = setTimeout(function check() {
+/*
+ * 角色来信调度：每 12h 一个检查点，5% 概率有角色来信。
+ *
+ * ★ 之前的实现只用一个 setTimeout 在内存里倒计时 12h，页面一关闭定时器就没了，
+ * 下次打开又是从 0 开始重新倒计时——如果每次打开网页的时长都凑不满连续 12h，
+ * 这个检查点就永远不会触发，等于信箱形同虚设。现在改成把"下一次检查点应该在什么时候"
+ * 存进 appData（持久化），每次打开页面都用真实经过的时间去补算所有已经错过的检查点
+ * （写法与朋友圈的 _processMomentInteractions 一致），这样哪怕每天只打开几分钟，
+ * 只要现实时间过去了 12h，该有的检查就一定会被补上。
+ */
+const MAIL_CHECK_INTERVAL   = 12 * 60 * 60 * 1000; // 12 小时一个检查点
+const MAIL_CHECK_MAX_CATCHUP = 60; // 一次最多补算 60 个检查点（约 30 天），防止系统时间被大幅调后死循环
+
+function _ensureMailScheduleInit() {
+  if (!appData.mailbox) appData.mailbox = { received: [], sent: [] };
+  if (!appData.mailbox.nextCheckAt) {
+    // 首次初始化：从"现在"开始算第一个检查点，不倒查历史，避免刚用上就一次性补发一堆信
+    appData.mailbox.nextCheckAt = Date.now() + MAIL_CHECK_INTERVAL;
+  }
+}
+
+function _processAutoMail() {
+  _ensureMailScheduleInit();
+  const now = Date.now();
+  let changed = false;
+  let receivedCount = 0;
+  let lastChatName = '';
+  let guard = 0;
+  const newMails = []; // 本次补算新产生的来信，用于触发来信通知弹窗
+
+  while (now >= appData.mailbox.nextCheckAt && guard < MAIL_CHECK_MAX_CATCHUP) {
+    guard++;
+    const checkTime = appData.mailbox.nextCheckAt; // 该检查点本该发生的时间，作为这封信的到达时间
     if (Math.random() < 0.05) {
       const chats = appData.chats;
       if (chats.length > 0) {
@@ -10702,19 +10964,132 @@ function scheduleAutoMail() {
           const body = active.sort(() => Math.random() - .5).slice(0, n).join('，');
           const subjects = ['想告诉你', '最近的心情', '给你的信', '今天的事', '悄悄话'];
           const subject = subjects[Math.floor(Math.random() * subjects.length)];
-          appData.mailbox.received.unshift({
-            id: Date.now(), chatId: chat.id, subject,
+          const newMail = {
+            id: checkTime + Math.random(), chatId: chat.id, subject,
             body, preview: body.slice(0, 40),
-            date: getTime(), read: false, replyChain: []
-          });
-          saveData();
-          if (currentView === 'mailbox') renderMailList();
-          showToast(`📬 收到 ${chat.name} 的来信！`);
+            ts: checkTime, read: false, replyChain: []
+          };
+          appData.mailbox.received.unshift(newMail);
+          newMails.push(newMail);
+          changed = true;
+          receivedCount++;
+          lastChatName = chat.name;
         }
       }
     }
-    _autoMailTimer = setTimeout(check, interval);
-  }, interval);
+    appData.mailbox.nextCheckAt += MAIL_CHECK_INTERVAL;
+  }
+
+  // 补算次数触顶（比如手动把系统时间调后了很久）：直接把下一个检查点重置到"现在+一个周期"，
+  // 不再继续追赶，避免之后一直在无意义地空转补算
+  if (guard >= MAIL_CHECK_MAX_CATCHUP && now >= appData.mailbox.nextCheckAt) {
+    appData.mailbox.nextCheckAt = now + MAIL_CHECK_INTERVAL;
+  }
+
+  if (changed) {
+    saveData();
+    _updateMailBadge();
+    if (currentView === 'mailbox') renderMailList();
+    // 逐封弹出「等会再看 / 现在就看」通知卡片（多封时自动排队依次弹出）
+    newMails.forEach(m => showMailNotifPopup(m));
+  }
+
+  _scheduleNextMailTick();
+}
+
+let _autoMailTimer = null;
+function _scheduleNextMailTick() {
+  clearTimeout(_autoMailTimer);
+  _ensureMailScheduleInit();
+  const delay = Math.max(1000, appData.mailbox.nextCheckAt - Date.now());
+  _autoMailTimer = setTimeout(_processAutoMail, delay);
+}
+
+/** 页面加载时立即补算离线期间错过的检查点，之后按真实检查点持续调度 */
+function scheduleAutoMail() {
+  _processAutoMail();
+}
+
+/* ════════════════════════════════════════════════════════════
+   P8 · 双人信箱 — 来信通知弹窗（等会再看 / 现在就看）
+   角色写来一封新信时弹出提醒卡片：
+   · 「等会再看」= 关闭弹窗，信件仍安静躺在收件箱里，未读角标照常提示
+   · 「现在就看」= 直接切到信箱、打开这封信的详情
+   若短时间内一次来多封信，则排队依次弹出，避免互相打断
+   ════════════════════════════════════════════════════════════ */
+let _mailNotifQueue   = [];
+let _mailNotifShowing = false;
+let _currentMailNotifObj = null;
+
+function showMailNotifPopup(mail, opts) {
+  if (!mail) return;
+  // 复用「顶部通知」总开关：用户关闭了消息提醒时，来信提醒也一并静音
+  if (appData.settings && appData.settings.notification === false) return;
+  // 正在这封信的详情里（比如刚点了回信在等对方回复），不用弹窗打断，安静更新即可
+  const detailOpen = document.getElementById('modal-mailDetail').style.display !== 'none';
+  if (detailOpen && _openMailObj && _openMailObj.id === mail.id) return;
+
+  if (_mailNotifShowing) {
+    _mailNotifQueue.push({ mail, opts });
+    return;
+  }
+  _renderMailNotifPopup(mail, opts);
+}
+
+function _renderMailNotifPopup(mail, opts) {
+  opts = opts || {};
+  _currentMailNotifObj = mail;
+  _mailNotifShowing = true;
+
+  const chat = getChatById(mail.chatId);
+  const avEl = document.getElementById('mailNotifAv');
+  if (chat && chat.avatar) {
+    avEl.innerHTML = `<img src="${chat.avatar}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
+  } else {
+    avEl.innerHTML = escHtml((chat && (chat.emoji || chat.name.charAt(0))) || '?');
+  }
+  avEl.style.background = chat ? avatarGradient(chat) : 'var(--primary-gradient)';
+
+  document.getElementById('mailNotifName').textContent    = opts.label || `${chat ? chat.name : 'TA'} 给你写了一封信`;
+  document.getElementById('mailNotifSubject').textContent = mail.subject || '';
+  document.getElementById('mailNotifPreview').textContent = opts.preview || mail.preview || (mail.body || '').slice(0, 40);
+
+  const overlay = document.getElementById('mailNotifOverlay');
+  overlay.classList.add('open');
+}
+
+/** 等会再看：关闭弹窗，信件保持未读状态，稍后可从信箱角标/列表里再打开 */
+function mailNotifLater() {
+  document.getElementById('mailNotifOverlay').classList.remove('open');
+  _mailNotifShowing = false;
+  _currentMailNotifObj = null;
+  _popNextMailNotif();
+}
+
+/** 现在就看：关闭弹窗，切到信箱并直接打开这封信 */
+function mailNotifViewNow() {
+  const mail = _currentMailNotifObj;
+  document.getElementById('mailNotifOverlay').classList.remove('open');
+  _mailNotifShowing = false;
+  _currentMailNotifObj = null;
+  if (!mail) return;
+
+  switchView('mailbox', null);
+  currentMailTab = 'inbox';
+  const tabs = document.querySelectorAll('.mail-tab');
+  tabs.forEach((t, i) => t.classList.toggle('active', i === 0)); // 收件箱是第一个 tab
+  renderMailList();
+  openMail(mail);
+
+  _popNextMailNotif();
+}
+
+/** 弹完一封后，若队列里还有排队的来信通知，稍等一下接着弹下一封 */
+function _popNextMailNotif() {
+  if (_mailNotifQueue.length > 0) {
+    const next = _mailNotifQueue.shift();
+    setTimeout(() => _renderMailNotifPopup(next.mail, next.opts), 320);
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -11451,6 +11826,8 @@ function initAllTimers() {
   scheduleCharPaintTimers(); // P3: 每10分钟1%概率发送绘画
   scheduleSpellMessage();    // P8: 拼字卡独立回复定时器
   _scheduleInteractionCheck(); // P7: 朋友圈互动轮询（含补发离线期间到期的点赞/评论）
+  _scheduleDateLabelRefresh(); // 每天 12:00 刷新消息/信箱的相对日期标签
+  _updateMailBadge();        // 启动时立即同步一次信箱未读角标
 }
 
 /** 从状态库中随机选取一条状态（支持分组权重） */
@@ -11547,6 +11924,32 @@ function _scheduleNoonStatusCheck() {
 }
 
 /**
+ * 每天 12:00 刷新一次当前可见界面里的日期标签（消息分割线的"今天/昨天/具体日期"、
+ * 信箱列表每条信的日期），保证聊天窗口哪怕从头一天一直开到第二天，这些相对日期
+ * 也会自动跟着变，不需要用户手动切换视图或刷新页面。
+ */
+let _dateLabelNoonTimer = null;
+function _scheduleDateLabelRefresh() {
+  clearTimeout(_dateLabelNoonTimer);
+  const now  = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+  if (now >= next) next.setDate(next.getDate() + 1); // 今天 12 点已过，等明天
+  const delay = next.getTime() - now.getTime();
+
+  _dateLabelNoonTimer = setTimeout(() => {
+    _refreshVisibleDateLabels();
+    _scheduleDateLabelRefresh(); // 设置明天 12 点的定时器
+  }, delay);
+}
+
+/** 重新渲染当前正在查看的、带日期标签的界面 */
+function _refreshVisibleDateLabels() {
+  if (currentView === 'chat' && currentChatId) renderMessages(currentChatId);
+  if (currentView === 'spellcards') renderSpellMessages();
+  if (currentView === 'mailbox') renderMailList();
+}
+
+/**
  * 调试用：立即让所有角色的在线状态过期并刷新（在浏览器控制台调用 __forceRefreshStatus() 即可）。
  * 用于验证状态刷新系统是否正常工作，无需等待最长 5 小时的自然到期。
  */
@@ -11615,7 +12018,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('beforeunload', () => {
   saveDataNow();
   [_autoMailTimer, _musicBubbleTimer, _signatureTimer, _statusRefreshTimer, _statusNoonTimer,
-   _autoMsgTimer, _autoMomentTimer, scheduleCallTimer, progressTimer, _spellMsgTimer]
+   _autoMsgTimer, _autoMomentTimer, scheduleCallTimer, progressTimer, _spellMsgTimer, _dateLabelNoonTimer]
     .forEach(t => { if (t) clearTimeout(t); });
   // 清除每个角色的独立定时器
   Object.keys(_charAutoTimers).forEach(cid => clearTimeout(_charAutoTimers[cid]));
@@ -11816,6 +12219,30 @@ window.addEventListener('load', () => {
 });
 </script>
 
+
+<!-- 来信通知弹窗（角色写信提醒：稍后再看 / 现在就看） -->
+<div class="modal-overlay" id="mailNotifOverlay">
+  <div class="modal-box" style="width:320px;max-width:90vw;">
+    <div class="modal-header">
+      <span class="modal-title">📬 收到新来信</span>
+      <button class="modal-close" onclick="mailNotifLater()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <div id="mailNotifAv" style="width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;overflow:hidden;"></div>
+        <div style="flex:1;min-width:0;">
+          <div id="mailNotifName" style="font-size:13px;font-weight:500;color:var(--text-main);margin-bottom:2px;"></div>
+          <div id="mailNotifSubject" style="font-size:13px;color:var(--text-main);font-weight:500;margin-bottom:3px;"></div>
+          <div id="mailNotifPreview" style="font-size:12px;color:var(--text-hint);line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn cancel" onclick="mailNotifLater()">等会再看</button>
+      <button class="btn primary" onclick="mailNotifViewNow()">现在就看 💌</button>
+    </div>
+  </div>
+</div>
 
 <!-- 删除联系人确认弹窗（替代 confirm，兼容移动端） -->
 <div class="modal-overlay" id="deleteConfirmOverlay">
