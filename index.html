@@ -4424,9 +4424,13 @@ function _saveDataImmediate() {
 }
 
 function saveData() {
-  // 合并短时间内的多次保存请求，默认 600ms 后统一写入一次
+  // 合并短时间内的多次保存请求，默认 200ms 后统一写入一次
+  // （此前是 600ms；对于"添加联系人/字卡后立刻下拉刷新"这类场景，
+  //  600ms 窗口期内页面刷新会导致这次修改来不及落盘就被新页面覆盖，
+  //  缩短等待时间可以显著降低这个风险。对真正需要"点击即保存"的
+  //  操作，见下方改用的 saveDataNow()。）
   if (_saveDataTimer) clearTimeout(_saveDataTimer);
-  _saveDataTimer = setTimeout(_saveDataImmediate, 600);
+  _saveDataTimer = setTimeout(_saveDataImmediate, 200);
 }
 
 /** 立即写入（跳过防抖），用于页面隐藏/卸载等必须保证落盘的场景 */
@@ -6057,7 +6061,7 @@ function addContact() {
   renderChatList();
   renderContacts();
   renderMobileChatList();
-  saveData();
+  saveDataNow(); // 新建联系人属于明确的一次性操作，立即落盘，不走防抖
   closeModal();
   showToast(`已添加 ${name}`);
 }
@@ -6092,7 +6096,7 @@ function _doDeleteContact(id) {
   renderChatList();
   renderMobileChatList();
   renderContacts();
-  saveData();
+  saveDataNow(); // 删除联系人属于明确的一次性操作，立即落盘，不走防抖
   showToast('已删除');
 }
 
@@ -8381,7 +8385,7 @@ function saveProfile() {
     window._profileAvatarData = '';
   }
   syncProfileUI();
-  saveData();
+  saveDataNow(); // 保存个人资料属于明确的一次性操作，立即落盘，不走防抖
   closeModal();
   showToast('资料已保存');
 }
@@ -9840,7 +9844,7 @@ function saveEditContact() {
     window._editContactAvatarData = undefined;
   }
   
-  saveData();
+  saveDataNow(); // 编辑联系人属于明确的一次性操作，立即落盘，不走防抖
   renderContacts();
   renderChatList();
   if (currentChatId === editContactId) updateChatHeader(editContactId);
@@ -10140,7 +10144,7 @@ function toggleBlockGroup(name) {
 function deleteSingleCard(idx) {
   if (!confirm('确认删除此词卡？')) return;
   _deleteCardAtIndex(idx);
-  saveData();
+  saveDataNow(); // 删除词卡属于明确的一次性操作，立即落盘，不走防抖
   renderCards();
   showToast('已删除');
 }
@@ -10204,7 +10208,7 @@ function addCard() {
   });
 
   textarea.value = '';
-  saveData();
+  saveDataNow(); // 添加词卡属于明确的一次性操作，立即落盘，不走防抖
   renderCards();
   closeModal();
   showToast(`已添加 ${lines.length} 条词卡`);
@@ -11474,6 +11478,13 @@ window.addEventListener('beforeunload', () => {
   Object.keys(_charPaintTimers).forEach(cid => clearTimeout(_charPaintTimers[cid]));
   clearInterval(callInterval);
   clearInterval(progressTimer);
+});
+
+// ★ iOS Safari 上 beforeunload 并不总是可靠触发（尤其是下拉刷新、
+// 直接左滑返回等手势导航场景），而 pagehide 是移动端浏览器更稳妥的
+// "页面即将离开"信号，这里额外挂一个兜底，确保刷新前数据已经落盘。
+window.addEventListener('pagehide', () => {
+  saveDataNow();
 });
 
 /* ════════════════════════════════════════════════════════════
