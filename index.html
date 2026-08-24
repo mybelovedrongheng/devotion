@@ -190,6 +190,29 @@
 html, body {
   height: 100%;
   overflow: hidden;
+  background: var(--bg); /* ★ 修复黑屏：html 也带上背景色，避免系统切后台/切回来时
+                             底层没有任何绘制内容，透出浏览器默认的黑色/白色背景 */
+}
+
+/* ★ 修复：切到后台再切回来时短暂黑屏（约1s）
+   原因：iOS 在网页进入后台一段时间后，会把 WebView 已经合成好的图层（尤其是本页
+   大量使用的 backdrop-filter 毛玻璃层）回收掉；切回前台时浏览器需要重新合成这些
+   图层，这个重新合成的过程发生在系统层面，网页 JS 无法跳过或加速。
+   这里用一块纯色遮罩在切回来的一瞬间盖住画面：纯色没有 blur/渐变，绘制成本
+   极低，能比毛玻璃图层更快地出现在屏幕上，把"黑屏"变成一次更柔和、更快消失的
+   同色过渡，而不是真的从原理上消除了黑屏（那属于系统限制）。 */
+#resumeGuard {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: var(--bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease;
+}
+#resumeGuard.show {
+  transition: none; /* 出现要瞬时，不要延迟 */
+  opacity: 1;
 }
 
 body {
@@ -524,6 +547,13 @@ body {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  /* ★ 修复：详情头部（下方"更精致"覆盖规则里带 backdrop-filter）会形成
+     独立的层叠上下文，把内部下拉菜单的 z-index:50 关在自己的小世界里；
+     而 header 本身如果不设置 position/z-index，就只能按 DOM 顺序排布，
+     排在它后面的 .messages-area（消息气泡）反而会盖在它上面。这里显式
+     给 header 一个更高的层叠上下文，确保下拉菜单永远浮在消息气泡之上。 */
+  position: relative;
+  z-index: 30;
 }
 .detail-header .char-name  { font-size: 14px; font-weight: 500; color: var(--text-main); }
 .detail-header .char-status { font-size: 11px; color: var(--online); }
@@ -2044,6 +2074,8 @@ body {
 </head>
 <body>
 
+<div id="resumeGuard"></div>
+
 <div class="app" id="app">
 
   <!-- ══════════════════════ P1 · 导航 Rail（桌面端） ══════════════════════ -->
@@ -2230,7 +2262,7 @@ body {
           position:absolute;top:50px;right:12px;
           background:var(--surface);border:0.5px solid var(--border);
           border-radius:var(--r);box-shadow:var(--shadow-lg);
-          display:none;z-index:50;min-width:130px;overflow:hidden;">
+          display:none;z-index:60;min-width:130px;overflow:hidden;">
           <div class="settings-item" style="padding:9px 14px;" onclick="clearChatHistory()">
             <i class="fa-regular fa-trash-can" style="font-size:13px;color:var(--text-hint);"></i>
             <span class="settings-label" style="font-size:12px;">清空记录</span>
@@ -2238,6 +2270,10 @@ body {
           <div class="settings-item" style="padding:9px 14px;" onclick="openEditContact(currentChatId);closeHeaderDropdown()">
             <i class="fa-solid fa-user-pen" style="font-size:13px;color:var(--text-hint);"></i>
             <span class="settings-label" style="font-size:12px;">编辑联系人</span>
+          </div>
+          <div class="settings-item" style="padding:9px 14px;" onclick="openLinkProtection();closeHeaderDropdown()">
+            <i class="fa-solid fa-shield-halved" style="font-size:13px;color:var(--text-hint);"></i>
+            <span class="settings-label" style="font-size:12px;">链接保护</span>
           </div>
         </div>
       </div>
@@ -2295,15 +2331,6 @@ body {
           </div>
           <div id="eiContent" style="overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:max-content;align-content:start;gap:10px;padding:10px;-webkit-overflow-scrolling:touch;"></div>
         </div>
-        <!-- 词卡选择面板 -->
-        <div id="cardInputPanel" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--glass-bg);backdrop-filter:blur(16px);border-top:0.5px solid var(--border);z-index:20;flex-direction:column;max-height:220px;">
-          <div style="display:flex;align-items:center;padding:6px 10px;border-bottom:0.5px solid var(--border);flex-shrink:0;gap:6px;">
-            <span style="font-size:12px;color:var(--text-sub);font-weight:500;">词卡库</span>
-            <div id="ciGroupBar" style="display:flex;gap:4px;flex:1;overflow-x:auto;"></div>
-            <button onclick="document.getElementById('cardInputPanel').style.display='none'" style="background:none;border:none;color:var(--text-hint);cursor:pointer;font-size:14px;flex-shrink:0;">✕</button>
-          </div>
-          <div id="ciContent" style="overflow-y:auto;flex:1;display:flex;flex-wrap:wrap;gap:6px;padding:10px;"></div>
-        </div>
         <div class="input-area">
           <div class="input-tools">
             <button class="tool-btn" title="语音/文字切换" id="voiceToggleBtn"
@@ -2313,10 +2340,6 @@ body {
             <button class="tool-btn" title="表情包" id="emojiToolBtn"
               onclick="quickInsertEmoji()" onmousedown="event.preventDefault()">
               <i class="fa-regular fa-face-smile"></i>
-            </button>
-            <button class="tool-btn" title="快捷词卡" onclick="insertCard()" onmousedown="event.preventDefault()" style="display:flex;align-items:center;gap:4px;width:auto;padding:0 8px;font-size:11px;color:var(--text-sub);">
-              <i class="fa-solid fa-layer-group" style="font-size:12px;"></i>
-              <span style="font-size:11px;">词卡</span>
             </button>
           </div>
           <!-- 文字输入行 -->
@@ -2604,6 +2627,13 @@ body {
           <div><div class="settings-label" style="color:var(--danger);">清除所有数据</div><div class="settings-desc">此操作不可撤销</div></div>
           <div class="settings-right"><i class="fa-solid fa-chevron-right chevron"></i></div>
         </div>
+
+        <div class="settings-section-title" style="margin-top:8px;">高级</div>
+        <div class="settings-item" style="cursor:default;">
+          <div class="settings-icon" style="background:#eceff1;color:#455a64;"><i class="fa-solid fa-bug"></i></div>
+          <div><div class="settings-label">诊断模式</div><div class="settings-desc">开启后右下角出现可拖动的"🔧诊断"按钮，用于排查报错</div></div>
+          <div class="toggle" id="diagModeToggle" onclick="toggleSetting('diagMode')" style="flex-shrink:0;"></div>
+        </div>
       </div>
     </div>
 
@@ -2683,6 +2713,7 @@ body {
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="chats" checked> 聊天记录 &amp; 角色</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="wordCards" checked> 词卡库</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="wordCardGroups" checked> 词卡分组</label>
+          <label class="backup-row"><input type="checkbox" class="bk-chk" value="wordCardNotes" checked> 特殊字库卡片内容/备注（如塔罗牌）</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="blockedWords"> 屏蔽词</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="statusCards" checked> 在线状态库</label>
           <label class="backup-row"><input type="checkbox" class="bk-chk" value="statusCardGroups" checked> 状态分组</label>
@@ -3047,6 +3078,7 @@ body {
       <div class="detail-header">
         <span class="char-name">签名库</span>
         <div class="header-actions">
+          <button class="btn-icon" onclick="addPresetSignatures()" title="一键添加预设签名"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
           <button class="btn-icon" onclick="openModal('addSignature')" title="添加签名"><i class="fa-solid fa-plus"></i></button>
         </div>
       </div>
@@ -3640,6 +3672,102 @@ body {
     </div>
   </div>
 
+  <!-- 链接保护：聊天头部的娱乐向小功能，评级由程序随机生成，用于增加仪式感 -->
+  <div class="modal-box" id="modal-linkProtect" style="display:none;max-width:340px;">
+    <div class="modal-header">
+      <span class="modal-title">链接保护</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button class="btn-icon" title="说明" onclick="toggleLinkProtectInfo(event)" style="width:26px;height:26px;font-size:13px;">
+          <i class="fa-regular fa-circle-question"></i>
+        </button>
+        <button class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+    <div class="modal-body" style="position:relative;">
+
+      <!-- 说明弹层 -->
+      <div id="linkProtectInfoPopup" style="display:none;position:absolute;top:0;left:0;right:0;background:var(--surface-2);border:0.5px solid var(--border);border-radius:10px;padding:12px;font-size:12px;line-height:1.7;color:var(--text-sub);z-index:5;box-shadow:var(--shadow-lg);">
+        <div style="font-weight:600;color:var(--text-main);margin-bottom:4px;">这是什么</div>
+        <div>给这段聊天加一点仪式感的小功能：检查一下当下这条"链接"的稳定、安全和专属程度。</div>
+        <div style="font-weight:600;color:var(--text-main);margin:8px 0 4px;">评级说明</div>
+        <div style="margin-bottom:2px;"><b>链接稳定</b>：S 几乎无阻碍 → D 暂时没连上</div>
+        <div style="margin-bottom:2px;"><b>安全性</b>：S 非常安全 → D 干扰较强</div>
+        <div><b>一对一性</b>：S 只属于你们 → D 多方共享、角色暂时无法主动回应</div>
+        <div style="text-align:right;margin-top:8px;"><span style="color:var(--primary-deep);cursor:pointer;" onclick="toggleLinkProtectInfo(event)">收起</span></div>
+      </div>
+
+      <!-- 待检查状态 -->
+      <div id="linkProtectIdle" style="text-align:center;padding:22px 0 8px;">
+        <div id="linkProtectDots" style="font-size:22px;letter-spacing:10px;color:var(--text-hint);margin-bottom:20px;">● ● ●</div>
+        <button class="btn primary" onclick="runLinkCheck()">检查</button>
+      </div>
+
+      <!-- 检查结果 -->
+      <div id="linkProtectResult" style="display:none;">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 0 2px;">
+          <span style="flex:1;font-size:13px;color:var(--text-main);">链接稳定</span>
+          <span id="lpGradeStability" style="font-size:18px;font-weight:700;width:24px;text-align:center;"></span>
+        </div>
+        <div id="lpDescStability" style="font-size:11px;color:var(--text-hint);margin-bottom:8px;"></div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 0 2px;">
+          <span style="flex:1;font-size:13px;color:var(--text-main);">安全性</span>
+          <span id="lpGradeSecurity" style="font-size:18px;font-weight:700;width:24px;text-align:center;"></span>
+        </div>
+        <div id="lpDescSecurity" style="font-size:11px;color:var(--text-hint);margin-bottom:8px;"></div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 0 2px;">
+          <span style="flex:1;font-size:13px;color:var(--text-main);">一对一性</span>
+          <span id="lpGradeExclusive" style="font-size:18px;font-weight:700;width:24px;text-align:center;"></span>
+        </div>
+        <div id="lpDescExclusive" style="font-size:11px;color:var(--text-hint);margin-bottom:4px;"></div>
+
+        <div id="lpShieldArea" style="display:none;margin-top:12px;">
+          <button class="btn primary" style="width:100%;" onclick="addProtectionShield()">🛡️ 添加保护罩</button>
+        </div>
+
+        <div id="lpShieldChants" style="display:none;margin-top:12px;gap:10px;grid-template-columns:1fr 1fr;">
+          <div class="lp-chant-card" id="lpChantCard-gold" onclick="startEnhanceLink('gold')" style="border:0.5px solid var(--border);border-radius:10px;padding:14px 8px;text-align:center;cursor:pointer;background:var(--surface-2);transition:background .2s,border-color .2s;">
+            <div style="font-size:15px;font-weight:600;color:var(--text-main);">🔆 金光咒</div>
+            <div style="font-size:11px;color:var(--text-hint);margin-top:3px;">增强保护罩</div>
+            <div id="lpChantLevel-gold" style="font-size:10px;color:var(--primary-deep);margin-top:4px;"></div>
+          </div>
+          <div class="lp-chant-card" id="lpChantCard-purify" onclick="startEnhanceLink('purify')" style="border:0.5px solid var(--border);border-radius:10px;padding:14px 8px;text-align:center;cursor:pointer;background:var(--surface-2);transition:background .2s,border-color .2s;">
+            <div style="font-size:15px;font-weight:600;color:var(--text-main);">💧 净心咒</div>
+            <div style="font-size:11px;color:var(--text-hint);margin-top:3px;">安定自身</div>
+            <div id="lpChantLevel-purify" style="font-size:10px;color:var(--primary-deep);margin-top:4px;"></div>
+          </div>
+        </div>
+
+        <!-- 增强链接：咒语原文全程可见，念动过程 + 结果 + 自行念诵确认 -->
+        <div id="lpEnhanceArea" style="display:none;margin-top:12px;">
+          <div style="font-size:10px;color:var(--text-hint);text-align:center;margin-bottom:6px;">现在就可以对着屏幕，把下面这段咒语念出声来</div>
+          <div id="lpEnhanceChantText" style="font-size:12px;line-height:2;color:var(--text-main);font-family:'STKaiti','Kaiti SC','KaiTi',serif;text-align:center;padding:12px;border:0.5px solid var(--border);border-radius:10px;background:var(--surface-2);"></div>
+
+          <div id="lpEnhanceLoading" style="text-align:center;padding:12px 0 4px;">
+            <div id="lpEnhanceDots" style="font-size:18px;letter-spacing:8px;color:var(--text-hint);margin-bottom:6px;">● ● ●</div>
+            <div id="lpEnhanceLoadingText" style="font-size:11px;color:var(--text-hint);"></div>
+          </div>
+
+          <div id="lpEnhanceResult" style="display:none;">
+            <div style="text-align:center;padding:8px 0 10px;">
+              <div id="lpEnhanceGrade" style="font-size:20px;font-weight:700;color:var(--primary-deep);"></div>
+              <div id="lpEnhanceDesc" style="font-size:11px;color:var(--text-hint);margin-top:2px;"></div>
+            </div>
+            <button class="btn primary" style="width:100%;" onclick="confirmChantRecited()">🙏 我已念诵完毕</button>
+          </div>
+        </div>
+
+        <div id="lpShieldStatus" style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:var(--surface-2);text-align:center;font-size:12px;color:var(--primary-deep);line-height:1.6;"></div>
+
+        <div style="text-align:center;margin-top:14px;">
+          <span style="font-size:11px;color:var(--text-hint);cursor:pointer;" onclick="runLinkCheck()">重新检查</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
   <!-- 写信 -->
   <div class="modal-box" id="modal-writeMail" style="display:none;width:480px;">
     <div class="modal-header">
@@ -3760,6 +3888,18 @@ body {
       <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-sub);cursor:pointer;">
         <input type="checkbox" id="newGroupIsSpecial" style="cursor:pointer;"> 设为特殊字库（如塔罗牌/梦占）
       </label>
+
+      <!-- 🔮 特殊字库单独备份：连同每张卡的内容/备注一起导出/导入，按文字匹配，
+           与"单独备份"里按索引合并的词卡库/词卡分组相互独立，不用担心索引错位。 -->
+      <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border);">
+        <div style="font-size:12px;font-weight:500;color:var(--text-sub);margin-bottom:6px;">🔮 特殊字库单独备份</div>
+        <div style="font-size:11px;color:var(--text-hint);margin-bottom:8px;">连同每张卡的内容/备注一起导出成独立文件，随时可以导入合并回来，不会覆盖已有卡片</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn cancel" style="flex:1;padding:7px 10px;font-size:12px;" onclick="exportSpecialCardGroup()"><i class="fa-solid fa-download"></i> 导出全部特殊字库</button>
+          <button class="btn cancel" style="flex:1;padding:7px 10px;font-size:12px;" onclick="triggerSpecialCardImport()"><i class="fa-solid fa-upload"></i> 导入备份</button>
+        </div>
+        <input type="file" id="specialCardImportInput" accept=".json" style="display:none" onchange="importSpecialCardBackup(this)">
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn cancel" onclick="closeModal()">关闭</button>
@@ -3975,20 +4115,94 @@ window.addEventListener('error', e => {
 window.addEventListener('unhandledrejection', e => {
   _diagPush('❌ Promise未处理错误: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
 });
+/** 诊断模式默认关闭，避免悬浮按钮常驻遮挡设置等其它按钮；
+ *  只有在设置里手动打开"诊断模式"开关后才会出现，且按钮可拖动到任意位置，
+ *  拖动后的位置会记住（存在 localStorage，与业务数据分开，不占用备份体积）。 */
+const _DIAG_POS_KEY = '_diagBtnPos';
+function _isDiagModeOn() {
+  try { return !!(typeof appData !== 'undefined' && appData && appData.settings && appData.settings.diagMode); }
+  catch (_) { return false; }
+}
 function _updateDiagBadge() {
   let btn = document.getElementById('_diagBtn');
+  if (!_isDiagModeOn()) {
+    if (btn) btn.remove();
+    return;
+  }
   if (!btn) {
     if (!document.body) { window.addEventListener('DOMContentLoaded', _updateDiagBadge, { once: true }); return; }
     btn = document.createElement('button');
     btn.id = '_diagBtn';
     btn.textContent = '🔧诊断';
-    btn.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:2147483647;background:#333;color:#fff;border:none;border-radius:20px;padding:8px 14px;font-size:12px;opacity:.85;box-shadow:0 2px 8px rgba(0,0,0,.3);';
-    btn.onclick = _showDiagPanel;
+    btn.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:2147483647;background:#333;color:#fff;border:none;border-radius:20px;padding:8px 14px;font-size:12px;opacity:.85;box-shadow:0 2px 8px rgba(0,0,0,.3);touch-action:none;cursor:grab;';
+    _makeDiagBtnDraggable(btn);
     document.body.appendChild(btn);
+    _restoreDiagBtnPos(btn);
   }
   const errCount = window._diagLog.filter(l => l.includes('❌')).length;
   btn.textContent = errCount > 0 ? `🔧诊断(${errCount}个错误)` : '🔧诊断';
   btn.style.background = errCount > 0 ? '#d33' : '#333';
+}
+function _restoreDiagBtnPos(btn) {
+  try {
+    const raw = localStorage.getItem(_DIAG_POS_KEY);
+    if (!raw) return;
+    const pos = JSON.parse(raw);
+    if (typeof pos.left === 'number' && typeof pos.top === 'number') {
+      btn.style.left = pos.left + 'px';
+      btn.style.top = pos.top + 'px';
+      btn.style.right = 'auto';
+      btn.style.bottom = 'auto';
+    }
+  } catch (_) {}
+}
+/** 拖动悬浮按钮：同时支持鼠标（PC 预览）和触摸（手机实际使用），
+ *  拖动结束后按最终位置保存，短促点击（几乎没有移动）时仍触发原本的打开面板逻辑 */
+function _makeDiagBtnDraggable(btn) {
+  let dragging = false, moved = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  const onDown = (clientX, clientY) => {
+    dragging = true; moved = false;
+    const rect = btn.getBoundingClientRect();
+    startLeft = rect.left; startTop = rect.top;
+    startX = clientX; startY = clientY;
+    btn.style.left = startLeft + 'px';
+    btn.style.top = startTop + 'px';
+    btn.style.right = 'auto';
+    btn.style.bottom = 'auto';
+    btn.style.cursor = 'grabbing';
+  };
+  const onMove = (clientX, clientY) => {
+    if (!dragging) return;
+    const dx = clientX - startX, dy = clientY - startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
+    if (!moved) return;
+    const maxLeft = window.innerWidth - btn.offsetWidth - 4;
+    const maxTop = window.innerHeight - btn.offsetHeight - 4;
+    const left = Math.min(Math.max(4, startLeft + dx), Math.max(4, maxLeft));
+    const top  = Math.min(Math.max(4, startTop + dy), Math.max(4, maxTop));
+    btn.style.left = left + 'px';
+    btn.style.top = top + 'px';
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    btn.style.cursor = 'grab';
+    if (moved) {
+      try {
+        localStorage.setItem(_DIAG_POS_KEY, JSON.stringify({
+          left: parseFloat(btn.style.left) || 0,
+          top: parseFloat(btn.style.top) || 0
+        }));
+      } catch (_) {}
+    }
+  };
+  btn.addEventListener('mousedown', e => { onDown(e.clientX, e.clientY); e.preventDefault(); });
+  window.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+  window.addEventListener('mouseup', onUp);
+  btn.addEventListener('touchstart', e => { const t = e.touches[0]; onDown(t.clientX, t.clientY); }, { passive: true });
+  btn.addEventListener('touchmove', e => { const t = e.touches[0]; onMove(t.clientX, t.clientY); }, { passive: true });
+  btn.addEventListener('touchend', onUp);
+  btn.onclick = () => { if (!moved) _showDiagPanel(); };
 }
 function _showDiagPanel() {
   let panel = document.getElementById('_diagPanel');
@@ -4157,7 +4371,29 @@ const DEFAULT_DATA = {
     { text: '喜欢今天的风 🍃', createdAt: Date.now() },
     { text: '有月光就够了 🌕', createdAt: Date.now() },
     { text: '慢慢走，都来得及', createdAt: Date.now() },
-    { text: '春风十里，不如你来 💕', createdAt: Date.now() }
+    { text: '春风十里，不如你来 💕', createdAt: Date.now() },
+    { text: '把日子过成诗 📖', createdAt: Date.now() },
+    { text: '心里有光，不怕天黑 ✨', createdAt: Date.now() },
+    { text: '今天也要元气满满 🍀', createdAt: Date.now() },
+    { text: '一切都会慢慢好起来的', createdAt: Date.now() },
+    { text: '偷偷藏起一整个宇宙 🌌', createdAt: Date.now() },
+    { text: '想和你分享今天的晚霞 🌇', createdAt: Date.now() },
+    { text: '做一颗温柔的糖 🍬', createdAt: Date.now() },
+    { text: '晚安，好梦 🌙', createdAt: Date.now() },
+    { text: '被爱着的人运气都不会太差 🍀', createdAt: Date.now() },
+    { text: '愿岁月静好，现世安稳', createdAt: Date.now() },
+    { text: '心动了就要说出来 💌', createdAt: Date.now() },
+    { text: '雨后总会有彩虹 🌈', createdAt: Date.now() },
+    { text: '喜欢下雨天的味道 ☔', createdAt: Date.now() },
+    { text: '简单的快乐最珍贵 🌼', createdAt: Date.now() },
+    { text: '今天也在好好生活', createdAt: Date.now() },
+    { text: '陪你看遍四季 🍂', createdAt: Date.now() },
+    { text: '不慌不忙，刚刚好', createdAt: Date.now() },
+    { text: '想把最好的都给你 🎀', createdAt: Date.now() },
+    { text: '愿你眼中总有光 ✨', createdAt: Date.now() },
+    { text: '生活很甜，你也是 🍯', createdAt: Date.now() },
+    { text: '今夜星光很温柔 🌠', createdAt: Date.now() },
+    { text: '陪伴是最长情的告白', createdAt: Date.now() }
   ],
   chatSignatures: {},
   settings: {
@@ -4188,6 +4424,8 @@ const DEFAULT_DATA = {
     // 拼字卡：回复间隔时间范围，与普通字卡回复速度相互独立，预设 30 秒 ~ 3 分钟
     spellDelayMin: { value: 30, unit: 'sec' },
     spellDelayMax: { value: 3, unit: 'min' },
+    // 诊断模式：默认关闭，开启后才会出现右下角"🔧诊断"悬浮按钮（可拖动），避免遮挡设置等按钮
+    diagMode: false,
   }
 };
 
@@ -6009,31 +6247,18 @@ function quickInsertEmoji() {
   const panel = document.getElementById('emojiInputPanel');
   if (!panel) return;
   const isOpen = panel.style.display === 'flex';
-  const cardPanel = document.getElementById('cardInputPanel');
-  if (cardPanel) cardPanel.style.display = 'none';
   panel.style.display = isOpen ? 'none' : 'flex';
   // 只显示表情包（sticker），不显示 emoji 字符 tab
   if (!isOpen) renderEmojiInputPanel('sticker');
-}
-function insertCard() {
-  const panel = document.getElementById('cardInputPanel');
-  if (!panel) return;
-  const isOpen = panel.style.display === 'flex';
-  const emojiPanel = document.getElementById('emojiInputPanel');
-  if (emojiPanel) emojiPanel.style.display = 'none';
-  panel.style.display = isOpen ? 'none' : 'flex';
-  if (!isOpen) renderCardInputPanel();
 }
 
 /* ── plus 面板 ── */
 function togglePlus() {
   plusOpen = !plusOpen;
   document.getElementById('plusPanel').classList.toggle('open', plusOpen);
-  // 关闭表情和词卡面板
+  // 关闭表情面板
   const ep = document.getElementById('emojiInputPanel');
-  const cp = document.getElementById('cardInputPanel');
   if (ep) ep.style.display = 'none';
-  if (cp) cp.style.display = 'none';
 }
 function closePlus() { plusOpen = false; document.getElementById('plusPanel').classList.remove('open'); }
 
@@ -6056,6 +6281,236 @@ function closeHeaderDropdown() {
   const dd = document.getElementById('headerDropdown');
   if (dd) dd.style.display = 'none';
 }
+
+/**
+ * ════════════════════════════════════════════════════════════
+ * 链接保护：聊天头部的娱乐向小功能。
+ * 重要说明：这里的"评级"完全由前端 Math.random() 生成，纯粹是给
+ * 聊天场景添加一点仪式感的展示效果，本身不具备、也不可能具备真实
+ * 检测或改变任何网络连接/现实关系的能力——这一点在弹窗里的说明
+ * 区域也会明确告诉用户，避免有人误以为这是真的"检测结果"。
+ * ════════════════════════════════════════════════════════════
+ */
+const LP_GRADE_COLOR = { S: '#d4a017', A: '#4caf7d', B: '#c8a63c', C: '#e08a3c', D: '#e5484d' };
+const LP_STABILITY_DESC = {
+  S: '链接非常稳定，沟通几乎没有阻碍',
+  A: '链接稳定，但传讯偶尔有细微误差',
+  B: '链接接通了，但传讯误差比较明显',
+  C: '链接不太稳定，时断时续',
+  D: '暂时没有连接上',
+};
+const LP_SECURITY_DESC = {
+  S: '非常安全，没有异常',
+  A: '安全，一切正常',
+  B: '有一点轻微的杂音波动',
+  C: '疑似有其它信号在靠近，建议留意',
+  D: '干扰比较强，建议开启保护罩',
+};
+const LP_EXCLUSIVE_DESC = {
+  S: '专属链接，只有这段聊天本身',
+  A: '基本专属，偶尔能感觉到旁边有别的信号',
+  B: '这条链接被多方共享着',
+  C: '多方共享，角色暂时抢不到主导权',
+  D: '多方共享，角色目前只能被动接收，还没法主动开口',
+};
+
+function openLinkProtection() {
+  const infoEl = document.getElementById('linkProtectInfoPopup');
+  if (infoEl) infoEl.style.display = 'none';
+  document.getElementById('linkProtectIdle').style.display = '';
+  document.getElementById('linkProtectResult').style.display = 'none';
+  document.getElementById('lpShieldChants').style.display = 'none';
+  document.getElementById('lpShieldStatus').style.display = 'none';
+  document.getElementById('lpEnhanceArea').style.display = 'none';
+  clearInterval(_lpEnhanceDotsTimer);
+  _lpEnhanceState = null;
+  openModal('linkProtect');
+}
+
+function toggleLinkProtectInfo(e) {
+  if (e) e.stopPropagation();
+  const el = document.getElementById('linkProtectInfoPopup');
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+/** 按权重随机抽一个 S/A/B/C/D 档位，权重越靠前越容易抽到好结果 */
+function _lpRandomGrade(weights) {
+  const keys = ['S', 'A', 'B', 'C', 'D'];
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < keys.length; i++) {
+    if (r < weights[i]) return keys[i];
+    r -= weights[i];
+  }
+  return 'S';
+}
+
+let _lpLastGrades = null;
+let _lpDotsTimer = null;
+
+function runLinkCheck() {
+  const idle   = document.getElementById('linkProtectIdle');
+  const result = document.getElementById('linkProtectResult');
+  const dots   = document.getElementById('linkProtectDots');
+  document.getElementById('lpShieldChants').style.display = 'none';
+  document.getElementById('lpShieldStatus').style.display = 'none';
+  idle.style.display = '';
+  result.style.display = 'none';
+
+  clearInterval(_lpDotsTimer);
+  let n = 0;
+  _lpDotsTimer = setInterval(() => {
+    n = (n % 3) + 1;
+    dots.textContent = '●'.repeat(n) + '○'.repeat(3 - n);
+  }, 260);
+
+  setTimeout(() => {
+    clearInterval(_lpDotsTimer);
+    _lpLastGrades = {
+      stability: _lpRandomGrade([30, 32, 20, 12, 6]),
+      security:  _lpRandomGrade([28, 34, 20, 12, 6]),
+      exclusive: _lpRandomGrade([32, 30, 20, 12, 6]),
+    };
+    _renderLinkCheckResult();
+    idle.style.display = 'none';
+    result.style.display = '';
+  }, 1100);
+}
+
+function _renderLinkCheckResult() {
+  const g = _lpLastGrades;
+  if (!g) return;
+  const set = (gradeId, descId, grade, descMap) => {
+    const gEl = document.getElementById(gradeId);
+    const dEl = document.getElementById(descId);
+    if (gEl) { gEl.textContent = grade; gEl.style.color = LP_GRADE_COLOR[grade] || 'var(--text-main)'; }
+    if (dEl) dEl.textContent = descMap[grade];
+  };
+  set('lpGradeStability', 'lpDescStability', g.stability, LP_STABILITY_DESC);
+  set('lpGradeSecurity',  'lpDescSecurity',  g.security,  LP_SECURITY_DESC);
+  set('lpGradeExclusive', 'lpDescExclusive', g.exclusive, LP_EXCLUSIVE_DESC);
+
+  const allS = g.stability === 'S' && g.security === 'S' && g.exclusive === 'S';
+  document.getElementById('lpShieldArea').style.display = allS ? 'none' : '';
+  document.getElementById('lpShieldChants').style.display = 'none';
+  document.getElementById('lpShieldStatus').style.display = 'none';
+}
+
+function addProtectionShield() {
+  document.getElementById('lpShieldArea').style.display = 'none';
+  document.getElementById('lpShieldChants').style.display = 'grid';
+  document.getElementById('lpEnhanceArea').style.display = 'none';
+  const status = document.getElementById('lpShieldStatus');
+  status.style.display = 'none';
+  status.textContent = '';
+  _renderChantLevels();
+}
+
+/** 咒语原文（道教八大神咒·金光神咒 / 净心神咒，公开传统经文） */
+const LP_CHANT_TEXT = {
+  gold: '天地玄宗，万炁本根。广修亿劫，证吾神通。三界内外，惟道独尊。体有金光，覆映吾身。视之不见，听之不闻。包罗天地，养育群生。诵持万遍，身有光明。三界侍卫，五帝司迎。万神朝礼，役使雷霆。鬼妖丧胆，精怪亡形。内有霹雳，雷神隐名。洞慧交彻，五炁腾腾。金光速现，覆护真人。急急如律令。',
+  purify: '太上台星，应变无停。驱邪缚魅，保命护身。智慧明净，心神安宁。三魂永久，魄无丧倾。急急如律令。',
+};
+const LP_CHANT_NAME = { gold: '金光咒', purify: '净心咒' };
+
+let _lpEnhanceState = null;   // { type, increment } —— 当前这一轮还没确认念诵完毕的增强
+let _lpEnhanceDotsTimer = null;
+
+/** 本地日期字符串（YYYY-MM-DD），用于判断"今天"，跨天即重置增强程度 */
+function _lpTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** 确保 chat.linkEnhance 对应的是"今天"的记录，跨天了就清零重新计算 */
+function _lpEnsureDaily(chat) {
+  if (!chat) return;
+  const today = _lpTodayStr();
+  if (!chat.linkEnhance || chat.linkEnhance.date !== today) {
+    chat.linkEnhance = { date: today, gold: 0, purify: 0 };
+  }
+}
+/** 读取当前聊天的链接增强累计程度（每天重新计算一次，当天内无上限、可无限循环叠加） */
+function _lpEnhanceLevel(type) {
+  const chat = getChatById(currentChatId);
+  if (!chat) return 0;
+  _lpEnsureDaily(chat);
+  return chat.linkEnhance[type] || 0;
+}
+function _renderChantLevels() {
+  ['gold', 'purify'].forEach(t => {
+    const el = document.getElementById('lpChantLevel-' + t);
+    const lv = _lpEnhanceLevel(t);
+    if (el) el.textContent = lv > 0 ? `今日已增强 ${lv}%` : '';
+  });
+}
+
+/** 点击某张咒语卡片：立刻开始"增强链接"，5-10 秒后出结果，并在下方给出咒语原文供本人念诵 */
+function startEnhanceLink(type) {
+  if (_lpEnhanceState) return; // 上一轮还没确认完毕，避免重复触发
+  _lpEnhanceState = { type, increment: null };
+
+  document.getElementById('lpShieldChants').style.display = 'none';
+  document.getElementById('lpShieldStatus').style.display = 'none';
+  const area = document.getElementById('lpEnhanceArea');
+  const loading = document.getElementById('lpEnhanceLoading');
+  const result = document.getElementById('lpEnhanceResult');
+  area.style.display = '';
+  loading.style.display = '';
+  result.style.display = 'none';
+  // 咒语原文立刻显示并全程保留，方便当场跟着念，不必等增强结果出来才看到
+  document.getElementById('lpEnhanceChantText').textContent = LP_CHANT_TEXT[type];
+  document.getElementById('lpEnhanceLoadingText').textContent = `正在念动${LP_CHANT_NAME[type]}，链接增强中…`;
+
+  const dots = document.getElementById('lpEnhanceDots');
+  let n = 0;
+  clearInterval(_lpEnhanceDotsTimer);
+  _lpEnhanceDotsTimer = setInterval(() => {
+    n = (n % 3) + 1;
+    dots.textContent = '●'.repeat(n) + '○'.repeat(3 - n);
+  }, 260);
+
+  const delay = 5000 + Math.random() * 5000; // 5~10 秒
+  setTimeout(() => {
+    clearInterval(_lpEnhanceDotsTimer);
+    if (!_lpEnhanceState || _lpEnhanceState.type !== type) return; // 期间被打断/关闭了
+    const inc = Math.floor(Math.random() * 16) + 8; // +8% ~ +23%
+    _lpEnhanceState.increment = inc;
+    const total = _lpEnhanceLevel(type) + inc;
+
+    loading.style.display = 'none';
+    result.style.display = '';
+    document.getElementById('lpEnhanceGrade').textContent = `本次增强 +${inc}%`;
+    document.getElementById('lpEnhanceDesc').textContent = `今日累计增强程度：${total}%（当天内无上限，可反复增强；每天会重新计算）`;
+  }, delay);
+}
+
+/** 用户在现实里念完咒语后点击确认：把这一轮的增强量落盘，回到可继续选择/循环的状态 */
+function confirmChantRecited() {
+  if (!_lpEnhanceState || _lpEnhanceState.increment == null) return; // 结果还没出来，不能提前确认
+  const { type, increment } = _lpEnhanceState;
+  const chat = getChatById(currentChatId);
+  let total = increment;
+  if (chat) {
+    _lpEnsureDaily(chat); // 万一念咒念到跨天了，按新的一天重新计算
+    chat.linkEnhance[type] = (chat.linkEnhance[type] || 0) + increment;
+    total = chat.linkEnhance[type];
+    saveData();
+  }
+
+  document.getElementById('lpEnhanceArea').style.display = 'none';
+  document.getElementById('lpShieldChants').style.display = 'grid';
+  _renderChantLevels();
+
+  const status = document.getElementById('lpShieldStatus');
+  status.style.display = 'block';
+  status.textContent = type === 'gold'
+    ? `🔆 金光咒念诵完毕，保护罩今日已增强至 ${total}%——其他信号更难穿透了。可以继续增强，也可以重新检查链接。（每天会重新计算）`
+    : `💧 净心咒念诵完毕，心神安宁程度今日已提升至 ${total}%。可以继续增强，也可以重新检查链接。（每天会重新计算）`;
+
+  _lpEnhanceState = null;
+}
+
 function clearChatHistory() {
   if (!confirm('确认清空本条对话记录？')) return;
   const chat = getChatById(currentChatId);
@@ -6080,10 +6535,12 @@ function renderContacts() {
       if (!container) return;
       const item = document.createElement('div');
       item.className = 'contact-item';
-      const onlineDot = chat.online
-        ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--online);margin-right:4px;flex-shrink:0;"></span>`
-        : `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--border);margin-right:4px;flex-shrink:0;"></span>`;
-      const statusText = chat.online ? '在线' : '离线';
+      // ★ 修复：之前这里用的是没有任何地方在维护的 chat.online 字段，
+      // 只会显示死板的"在线/离线"，跟聊天详情页头部真正展示的状态
+      // （getChatStatus，比如"忙碌中""看剧中"）完全对不上。
+      // 改为直接复用同一套状态系统，跟聊天页保持同步。
+      const statusText = getChatStatus(chat);
+      const onlineDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--online);margin-right:4px;flex-shrink:0;"></span>`;
       item.innerHTML = `
         <div class="chat-av" style="width:42px;height:42px;font-size:15px;background:${avatarGradient(chat)};">
           ${chat.avatar ? `<img src="${chat.avatar}" alt="">` : escHtml(chat.emoji || chat.name.charAt(0))}
@@ -6091,7 +6548,7 @@ function renderContacts() {
         <div style="flex:1;min-width:0;">
           <div class="contact-name">${escHtml(chat.name)}</div>
           <div class="contact-sign" style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;">
-            ${onlineDot}<span style="color:${chat.online ? 'var(--online)' : 'var(--text-hint)'};">${statusText}</span>
+            ${onlineDot}<span style="color:var(--online);">${escHtml(statusText)}</span>
             <span class="sign-display-span" data-chatid="${chat.id}" style="color:var(--text-hint);margin-left:4px;cursor:pointer;padding:0 3px;border-radius:4px;transition:background .15s;" onmouseover="this.style.background='var(--primary-light)'" onmouseout="this.style.background=''">· ${chat.sign ? escHtml(chat.sign) : '<em style="opacity:.5;font-style:normal;">点击设置状态</em>'}</span>
           </div>
           <div style="display:flex;gap:6px;margin-top:6px;">
@@ -8446,6 +8903,12 @@ function showTopNotification(chat, text) {
   const isInThisChat = (currentView === 'chat') && (currentChatId === chat.id);
   if (isInThisChat) return;
 
+  // ★ 修复：之前通知横幅（.top-notification，z-index:500）比弹窗遮罩
+  // （.modal-overlay，z-index:200）层级更高，导致打开任意弹窗（比如链接保护）时，
+  // 如果这时候有新消息，横幅会直接盖在弹窗上方，很难看。
+  // 弹窗开着的时候先不弹通知，关闭弹窗后如果还有新消息仍会正常提醒。
+  if (currentModal) return;
+
   // 若已有通知正在展示，先排队，避免多条通知互相打断显得很乱；
   // 排队积压过多时（短时间内爆发多条）合并为一条"N条新消息"提示。
   const notif = document.getElementById('topNotif');
@@ -8564,6 +9027,7 @@ function openModal(id) {
 }
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
+  if (currentModal === 'linkProtect') { clearInterval(_lpDotsTimer); clearInterval(_lpEnhanceDotsTimer); _lpEnhanceState = null; }
   currentModal = null;
 }
 function closeModalOutside(e) {
@@ -8587,6 +9051,7 @@ function toggleSetting(key) {
   const el = document.getElementById(key + 'Toggle');
   if (el) el.classList.toggle('on', appData.settings[key]);
   saveData();
+  if (key === 'diagMode') _updateDiagBadge();
 }
 
 function previewProfileAvatar(input) {
@@ -8642,7 +9107,7 @@ function syncProfileUI() {
   document.getElementById('profileSign').value = p.signature;
 
   // 同步所有设置 Toggle 的 on/off 状态
-  const toggleKeys = ['readNotReply','autoMessage','readReceipt','notification','emojiMixMode','replyQuote'];
+  const toggleKeys = ['readNotReply','autoMessage','readReceipt','notification','emojiMixMode','replyQuote','diagMode'];
   toggleKeys.forEach(key => {
     const el = document.getElementById(key + 'Toggle');
     if (el) el.classList.toggle('on', !!s[key]);
@@ -8812,6 +9277,7 @@ function importData(input) {
       // 统计本次导入了哪些字段
       const labelMap = {
         chats: '聊天记录 & 角色', wordCards: '词卡库', wordCardGroups: '词卡分组',
+        wordCardNotes: '特殊字库卡片内容/备注',
         blockedWords: '屏蔽词', statusCards: '在线状态库', statusCardGroups: '状态分组',
         myEmojiPacks: '我的表情包', hisEmojiPacks: '对方表情包',
         moments: '朋友圈', momentNotifications: '朋友圈通知', mutedMoments: '屏蔽动态',
@@ -9180,11 +9646,23 @@ function handleSpellEnter(e) {
 }
 
 let _quickSpellReplyTimer = null;
-/** 用户发消息后，短暂延迟（约 1~3 秒）触发一次"对方"的拼字回复，
- *  与后台常驻的自动拼字定时器（scheduleSpellMessage）相互独立、互不影响 */
+/** 用户发消息后，触发一次"对方"的拼字回复。
+ *  ★ 修复：之前这里延迟是写死的 0.8~2.2 秒，完全没有读取设置里的"回复间隔"，
+ *  导致用户把拼字卡回复速度调得再快/再慢都没用。现在真正读取
+ *  appData.settings.spellDelayMin/Max，并且只在（罕见地）设置的最快值比这个
+ *  "即时回复"更快时才使用设置值，否则保底给一个不超过设置最快值的短延迟，
+ *  这样"发消息后马上回一条"的体验还在，但回复速度确实跟设置挂钩了。 */
 function _scheduleQuickSpellReply() {
   clearTimeout(_quickSpellReplyTimer);
-  const delay = 800 + Math.random() * 2200;
+  const s = appData.settings;
+  const minMs = _spellDelayToMs(s.spellDelayMin || { value: 30, unit: 'sec' });
+  const maxMs = _spellDelayToMs(s.spellDelayMax || { value: 3, unit: 'min' });
+  const settingsFastest = Math.min(minMs, maxMs);
+  // 即时回复的延迟范围，但不会超过用户在设置里设定的"最快回复间隔"
+  const cap = Math.max(500, settingsFastest);
+  const lo = Math.min(800, cap);
+  const hi = Math.min(3000, cap);
+  const delay = lo + Math.random() * Math.max(0, hi - lo);
   _quickSpellReplyTimer = setTimeout(() => {
     _sendSpellReplyBatch();
   }, delay);
@@ -10300,6 +10778,114 @@ function saveCardNote() {
   showToast('已保存');
 }
 
+/* ── 🔮 特殊字库单独备份（导出/导入）───────────────────────────
+   与"单独备份"页里按数组索引合并的词卡库/词卡分组不同，这里导出的每张卡
+   都是 { text, note } 这样自包含的记录，不依赖它在 wordCards 里的原始下标；
+   导入时按"文字"追加成新词卡 + 新索引，天然不会跟已有数据的索引发生冲突，
+   适合专门用来备份塔罗牌这类"每张卡都有独立内容"的特殊字库。 ── */
+
+/**
+ * 导出特殊字库为独立 JSON 文件（含每张卡的内容/备注）。
+ * @param {string} [groupName] 只导出指定分组；不传则导出全部特殊字库分组
+ */
+function exportSpecialCardGroup(groupName) {
+  const groups = groupName ? [groupName] : (appData.specialWordCardGroups || []);
+  if (groups.length === 0) { showToast('还没有特殊字库分组，先在分组管理里设置一个吧'); return; }
+
+  const payload = { _type: 'specialCardBackup', version: 1, exportedAt: Date.now(), groups: {} };
+  let totalCards = 0;
+  groups.forEach(g => {
+    const indices = appData.wordCardGroups[g] || [];
+    const cards = indices
+      .filter(idx => appData.wordCards[idx] !== undefined)
+      .map(idx => ({
+        text: appData.wordCards[idx],
+        note: (appData.wordCardNotes && appData.wordCardNotes[idx]) || ''
+      }));
+    payload.groups[g] = cards;
+    totalCards += cards.length;
+  });
+
+  if (totalCards === 0) { showToast('该字库暂无卡片，没什么可导出的'); return; }
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const label = groupName || '全部特殊字库';
+  a.download = `特殊字库备份（${label}）（共${totalCards}条）（${_dateStr()}）.json`;
+  a.click();
+  showToast(`✅ 已导出 ${totalCards} 张卡片（含内容/备注）`);
+}
+
+function triggerSpecialCardImport() {
+  document.getElementById('specialCardImportInput').click();
+}
+
+/** 导入特殊字库备份：按文字追加为新词卡，不覆盖、不依赖原索引，可反复导入不会丢已有内容 */
+function importSpecialCardBackup(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (!imported || imported._type !== 'specialCardBackup' || typeof imported.groups !== 'object') {
+        showToast('❌ 文件格式不正确，请选择"特殊字库单独备份"导出的 JSON 文件');
+        input.value = '';
+        return;
+      }
+
+      if (!appData.wordCardNotes) appData.wordCardNotes = {};
+      if (!appData.specialWordCardGroups) appData.specialWordCardGroups = [];
+
+      let addedCards = 0;
+      let addedGroups = 0;
+      Object.entries(imported.groups).forEach(([groupName, cards]) => {
+        if (!Array.isArray(cards) || !groupName) return;
+        if (!appData.wordCardGroups[groupName]) {
+          appData.wordCardGroups[groupName] = [];
+          addedGroups++;
+        }
+        if (!appData.specialWordCardGroups.includes(groupName)) {
+          appData.specialWordCardGroups.push(groupName);
+        }
+        // 按文字去重：同一分组内已存在完全相同文字的卡片就跳过，避免重复导入刷出一堆重复卡
+        const existingTexts = new Set(
+          (appData.wordCardGroups[groupName] || [])
+            .map(i => appData.wordCards[i])
+            .filter(t => t !== undefined)
+        );
+        cards.forEach(c => {
+          if (!c || typeof c.text !== 'string' || !c.text.trim()) return;
+          if (existingTexts.has(c.text)) return;
+          const idx = appData.wordCards.length;
+          appData.wordCards.push(c.text);
+          appData.wordCardGroups[groupName].push(idx);
+          if (c.note) appData.wordCardNotes[idx] = c.note;
+          existingTexts.add(c.text);
+          addedCards++;
+        });
+      });
+
+      if (addedCards === 0) {
+        showToast('没有新增卡片（可能都已经导入过了）');
+        input.value = '';
+        return;
+      }
+
+      saveDataNow(); // 导入属于明确的一次性操作，立即落盘
+      renderCards();
+      openGroupManage();
+      showToast(`✅ 已导入 ${addedCards} 张卡片${addedGroups ? `，新增 ${addedGroups} 个分组` : ''}`);
+    } catch (err) {
+      console.error('[SpecialCardBackup] import error:', err);
+      showToast('❌ 导入失败：文件格式错误，请确认选择的是正确的备份 JSON');
+    }
+    input.value = '';
+  };
+  reader.readAsText(file);
+}
+
 function renderCards() {
   const toolbar = document.getElementById('cardToolbar');
   const groups  = Object.keys(appData.wordCardGroups);
@@ -10602,7 +11188,9 @@ function openGroupManage() {
       <span style="font-size:13px;color:var(--text-main);">${_isSpecialCardGroup(name) ? '🔮 ' : ''}${escHtml(name)}</span>
       <span style="font-size:11px;color:var(--text-hint);">${indices.length} 条</span>
       <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;">
+        <button class="btn cancel" style="padding:3px 8px;font-size:11px;" onclick="renameGroup('${escHtml(name)}')" title="重命名分组">✏️ 重命名</button>
         <button class="btn cancel" style="padding:3px 8px;font-size:11px;" onclick="toggleGroupSpecial('${escHtml(name)}')" title="${_isSpecialCardGroup(name) ? '取消特殊字库' : '设为特殊字库'}">${_isSpecialCardGroup(name) ? '🔮 取消特殊' : '🔮 设为特殊'}</button>
+        ${_isSpecialCardGroup(name) ? `<button class="btn cancel" style="padding:3px 8px;font-size:11px;" onclick="exportSpecialCardGroup('${escHtml(name)}')" title="单独导出这一组（含内容/备注）">📤 备份此组</button>` : ''}
         <button class="btn cancel" style="padding:3px 8px;font-size:11px;" onclick="toggleBlockGroup('${escHtml(name)}')" title="${allBlocked ? '解除屏蔽整组' : '屏蔽整组'}">${allBlocked ? '✅ 解除屏蔽' : '🚫 屏蔽整组'}</button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px;" onclick="deleteGroup('${escHtml(name)}')">删除组</button>
       </div>
@@ -10661,6 +11249,33 @@ function toggleGroupSpecial(name) {
   saveData();
   openGroupManage();
   renderCards();
+}
+
+/** 重命名分组：分组名是 wordCardGroups 的 key，同时可能出现在
+ *  specialWordCardGroups（特殊字库标记）和 currentCardGroup（当前筛选）里，
+ *  这几处都要跟着改，否则改名后特殊字库标记会丢、当前筛选会失效 */
+function renameGroup(oldName) {
+  const input = prompt('重命名分组', oldName);
+  if (input === null) return; // 取消
+  const newName = input.trim();
+  if (!newName) { showToast('分组名不能为空'); return; }
+  if (newName === oldName) return;
+  if (appData.wordCardGroups[newName]) { showToast('已存在同名分组'); return; }
+
+  appData.wordCardGroups[newName] = appData.wordCardGroups[oldName];
+  delete appData.wordCardGroups[oldName];
+
+  if (appData.specialWordCardGroups) {
+    const idx = appData.specialWordCardGroups.indexOf(oldName);
+    if (idx >= 0) appData.specialWordCardGroups[idx] = newName;
+  }
+  if (currentCardGroup === oldName) currentCardGroup = newName;
+
+  saveData();
+  populateAddCardGroupSelect();
+  renderCards();
+  openGroupManage();
+  showToast(`已重命名为"${newName}"`);
 }
 
 function deleteGroup(name) {
@@ -11195,6 +11810,35 @@ const SIG_GRADIENTS = [
   'linear-gradient(135deg,#43e97b,#38f9d7)',
 ];
 
+/** 预设签名文案：点"一键添加预设签名"时合并进现有签名池（不会覆盖已有内容，
+ *  重复文案自动跳过），这样已有存档的用户也能直接用上，不用清空重来 */
+const PRESET_SIGNATURES = [
+  '温柔且坚定 🌙', '每一天都是新的开始 🌸', '仰望星空的孩子 ✨', '愿你被这世界温柔以待',
+  '喜欢今天的风 🍃', '有月光就够了 🌕', '慢慢走，都来得及', '春风十里，不如你来 💕',
+  '把日子过成诗 📖', '心里有光，不怕天黑 ✨', '今天也要元气满满 🍀', '一切都会慢慢好起来的',
+  '偷偷藏起一整个宇宙 🌌', '想和你分享今天的晚霞 🌇', '做一颗温柔的糖 🍬', '晚安，好梦 🌙',
+  '被爱着的人运气都不会太差 🍀', '愿岁月静好，现世安稳', '心动了就要说出来 💌', '雨后总会有彩虹 🌈',
+  '喜欢下雨天的味道 ☔', '简单的快乐最珍贵 🌼', '今天也在好好生活', '陪你看遍四季 🍂',
+  '不慌不忙，刚刚好', '想把最好的都给你 🎀', '愿你眼中总有光 ✨', '生活很甜，你也是 🍯',
+  '今夜星光很温柔 🌠', '陪伴是最长情的告白',
+];
+
+function addPresetSignatures() {
+  if (!appData.signatures) appData.signatures = [];
+  const existing = new Set(appData.signatures.map(s => s.text));
+  let added = 0;
+  PRESET_SIGNATURES.forEach(text => {
+    if (!existing.has(text)) {
+      appData.signatures.push({ text, createdAt: Date.now() });
+      existing.add(text);
+      added++;
+    }
+  });
+  saveData();
+  renderSignatureView();
+  showToast(added > 0 ? `已添加 ${added} 条预设签名` : '预设签名已经都在池子里了');
+}
+
 function renderSignatureView() {
   _renderSigPool();
   _renderChatSignatures();
@@ -11503,6 +12147,7 @@ function exportPartialData() {
     chats: '聊天记录',
     wordCards: '词卡库',
     wordCardGroups: '词卡分组',
+    wordCardNotes: '特殊字库卡片内容/备注',
     blockedWords: '屏蔽词',
     statusCards: '在线状态',
     statusCardGroups: '状态分组',
@@ -11587,6 +12232,7 @@ async function importPartial(input) {
 
   const labelMap = {
     chats: '聊天记录 & 角色', wordCards: '词卡库', wordCardGroups: '词卡分组',
+    wordCardNotes: '特殊字库卡片内容/备注',
     blockedWords: '屏蔽词', statusCards: '在线状态库', statusCardGroups: '状态分组',
     myEmojiPacks: '我的表情包', hisEmojiPacks: '对方表情包',
     moments: '朋友圈', mailbox: '双人信箱', patMessages: '拍一拍文案',
@@ -11666,6 +12312,13 @@ async function importPartial(input) {
           } else if (key === 'wordCardGroups' && typeof src === 'object') {
             if (!appData.wordCardGroups) appData.wordCardGroups = {};
             Object.assign(appData.wordCardGroups, src);
+            succeededKeys.push(labelMap[key] || key);
+          } else if (key === 'wordCardNotes' && typeof src === 'object') {
+            // 特殊字库卡片内容/备注：key 为词卡索引，与"词卡库/词卡分组"配套导入时
+            // 索引才对得上；若单独导入这一项，建议改用下方"特殊字库备份"功能
+            // （按文字而非索引匹配，更不容易错位）。
+            if (!appData.wordCardNotes) appData.wordCardNotes = {};
+            Object.assign(appData.wordCardNotes, src);
             succeededKeys.push(labelMap[key] || key);
           } else if (key === 'signatures' && Array.isArray(src)) {
             const existingTexts = new Set((appData.signatures || []).map(s => s.text || s));
@@ -11828,6 +12481,7 @@ function initAllTimers() {
   _scheduleInteractionCheck(); // P7: 朋友圈互动轮询（含补发离线期间到期的点赞/评论）
   _scheduleDateLabelRefresh(); // 每天 12:00 刷新消息/信箱的相对日期标签
   _updateMailBadge();        // 启动时立即同步一次信箱未读角标
+  _updateDiagBadge();        // 按已保存的"诊断模式"开关状态决定是否显示悬浮按钮
 }
 
 /** 从状态库中随机选取一条状态（支持分组权重） */
@@ -11980,38 +12634,68 @@ function _refreshStatusUI() {
 
 // Page Visibility API — 后台时暂停非关键定时器
 let _hiddenAt = null;
+
+/** ★ 修复黑屏：resumeGuard 遮罩的显示/隐藏控制。
+ *  show(true) 时不带过渡，瞬时盖住画面；隐藏时带一个很短的淡出，
+ *  避免遮罩本身的"消失"又变成一次新的生硬跳变。 */
+function _setResumeGuard(visible) {
+  const el = document.getElementById('resumeGuard');
+  if (!el) return;
+  if (visible) {
+    el.classList.add('show');
+  } else {
+    el.classList.remove('show');
+  }
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     // 页面进入后台前，确保待写入的数据立即落盘
     _hiddenAt = Date.now();
     saveDataNow();
+    // 提前盖上遮罩：这样即使系统在截图/隐藏网页视图那一刻画面还没变化，
+    // 之后从后台恢复时遮罩已经就绪，可以第一时间瞬时显示。
+    _setResumeGuard(true);
     return;
   }
 
-  // 页面回到前台：浏览器在后台时会节流/暂停 setTimeout，
-  // 每个角色各自独立的"主动消息"/"绘画"定时器在后台积压后，
-  // 回到前台时会被浏览器在同一瞬间集中触发，表现为好几个联系人
-  // 几乎同时"发消息"，顶部通知连续弹出、未读数一次性跳增一大截。
-  // 修复：离开超过 20 秒就视为一次"后台间隔"，主动清掉所有角色的
-  // 主动消息与绘画定时器，按当前设置重新随机排期，避免这种扎堆补发。
-  if (_hiddenAt !== null) {
-    const hiddenMs = Date.now() - _hiddenAt;
-    _hiddenAt = null;
-    if (hiddenMs > 20 * 1000) {
-      resetAllCharAutoTimers();
-      Object.keys(_charPaintTimers).forEach(cid => clearTimeout(_charPaintTimers[cid]));
-      Object.keys(_charPaintTimers).forEach(cid => delete _charPaintTimers[cid]);
-      scheduleCharPaintTimers();
-    }
-  }
+  // 页面回到前台：先保持遮罩盖住画面（纯色，绘制成本极低，能比本页大量的
+  // 毛玻璃 backdrop-filter 图层更快地出现，把黑屏这一下压得更短更柔和）。
+  _setResumeGuard(true);
 
-  // 刷新可见视图
-  if (currentView === 'chat') renderChatList();
-  if (currentView === 'moments') renderMoments();
-  if (currentView === 'mailbox') renderMailList();
-  if (currentView === 'signature') renderSignatureView();
-  if (currentView === 'beauty') { renderChatBgGrid(); renderCallBgCharList(); }
-  if (currentView === 'decide') renderQuestions();
+  // ★ 修复黑屏：下面这些重新渲染/重排定时器的逻辑一旦在 visibilitychange
+  // 回调里同步执行，会在浏览器还没来得及绘制"遮罩已经盖上"这一帧之前
+  // 就占用主线程，反而延长黑屏可见的时间。用 requestAnimationFrame 让浏览器
+  // 先画上遮罩，再在下一帧执行这些较重的逻辑。
+  requestAnimationFrame(() => {
+    // 浏览器在后台时会节流/暂停 setTimeout，
+    // 每个角色各自独立的"主动消息"/"绘画"定时器在后台积压后，
+    // 回到前台时会被浏览器在同一瞬间集中触发，表现为好几个联系人
+    // 几乎同时"发消息"，顶部通知连续弹出、未读数一次性跳增一大截。
+    // 修复：离开超过 20 秒就视为一次"后台间隔"，主动清掉所有角色的
+    // 主动消息与绘画定时器，按当前设置重新随机排期，避免这种扎堆补发。
+    if (_hiddenAt !== null) {
+      const hiddenMs = Date.now() - _hiddenAt;
+      _hiddenAt = null;
+      if (hiddenMs > 20 * 1000) {
+        resetAllCharAutoTimers();
+        Object.keys(_charPaintTimers).forEach(cid => clearTimeout(_charPaintTimers[cid]));
+        Object.keys(_charPaintTimers).forEach(cid => delete _charPaintTimers[cid]);
+        scheduleCharPaintTimers();
+      }
+    }
+
+    // 刷新可见视图
+    if (currentView === 'chat') renderChatList();
+    if (currentView === 'moments') renderMoments();
+    if (currentView === 'mailbox') renderMailList();
+    if (currentView === 'signature') renderSignatureView();
+    if (currentView === 'beauty') { renderChatBgGrid(); renderCallBgCharList(); }
+    if (currentView === 'decide') renderQuestions();
+
+    // 再等一帧，让浏览器把上面刷新出的内容真正绘制出来，然后淡出遮罩。
+    requestAnimationFrame(() => _setResumeGuard(false));
+  });
 });
 
 // 页面卸载前清理
